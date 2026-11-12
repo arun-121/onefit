@@ -1,56 +1,92 @@
-# Welcome to your Expo app 👋
+# Calorie Tracker
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+A personal, Android-first app for keeping track of fitness goals. You log food, exercise and weight each day, and the Progress tab shows what it adds up to after a week, a month or three. You type what you ate and Groq's AI estimates the calories and macros, which you check before saving. Data stays on the phone in SQLite, and can be shared with Google Fit through Health Connect.
 
-## Get started
+What the app is for, and how every figure is worked out, is in `docs/PRODUCT.md`.
 
-1. Install dependencies
+## What's in it
 
-   ```bash
-   npm install
-   ```
+- **Log food by typing**, sorted into breakfast, lunch, dinner and snacks. The AI estimate is editable before saving. (Voice logging is built but switched off in `src/constants/features.ts` until it has been tested on a phone. Photo logging was dropped: estimates from photos weren't accurate enough.)
+- **Remembers your corrections.** Edit an item and the AI reuses your numbers for that food next time.
+- **Favourites.** Foods you log often (or star) become one-tap chips on Today and on the widget.
+- **Copy a meal** from yesterday.
+- **Log exercise**: activity, minutes and intensity, with the calories burned estimated from your weight. A new workout starts from the last one you logged.
+- **Weigh-ins**, one a day, from the Weight tile on Today. Weigh-ins from a smart scale or another app can be read through Health Connect.
+- **Daily targets** for calories, protein, carbs and fat, with an optional calculator (Mifflin–St Jeor).
+- **Reminders** as local notifications, with no server: one for each meal, and an optional daily weigh-in reminder. Each is skipped once that meal or weight is logged, and the meal ones have *Log now* and *Same as yesterday* buttons. After a week away from the app, a few come-back reminders follow over the next month. The app asks to allow notifications after the first food you log.
+- **Health Connect.** Food, workouts and weigh-ins are written to Health Connect, so they show up in Google Fit. Steps and active calories show on Today, and active calories can optionally be added to your budget. Every permission is optional.
+- **Home-screen widgets.** *Quick log* (4×2) shows a calorie ring, three one-tap favourites with Undo, and a Log food button. *Calories left* (2×1) shows the number and a + button.
+- **Progress** over the last 7, 30 or 90 days: where your weight is heading, what you eat and burn on average, macros, exercise, consistency, patterns and top foods, with every past day one tap away. A figure appears only once there is enough data behind it; until then the app says what to log.
+- **Backup and restore.** Settings → Your data exports everything (food, saved foods, workouts, weigh-ins and settings, never the Groq key) as one JSON file, and restores it on this or another phone.
 
-2. Start the app
+## Design
 
-   ```bash
-   npx expo start
-   ```
+Calm, Google first-party style (references: Google Home, Wallet, Photos), built on Material 3 / M3 Expressive:
 
-In the output, you'll find options to open the app in a
+- **Colour:** the Android system's Material You scheme is the only source. The app never generates a palette or imposes a brand colour; it follows your wallpaper/accent like Pixel apps (Google's static M3 baseline only where dynamic colour doesn't exist).
+- **Type:** Roboto with the M3 type scale, regular weights, no oversized display text.
+- **Icons:** Material Symbols (`expo-symbols`), including the navigation bar.
+- **Layout:** one focal point per screen. Today's hero is a thermostat-style calories tile with a wavy line for the day's budget; macros are pastel category tiles on the system containers; lists are rounded tonal items; editing opens a native bottom sheet.
+- **Motion:** springs only where something changed (ring fill, pressed buttons, new entries); reduced motion respected.
 
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
+Tokens live in `src/constants/theme.ts`; components in `src/components/`. The design rules agents must follow are in `AGENTS.md`; `docs/DESIGN.md` turns them into this app's colour, type, shape and layout decisions.
 
-You can start developing by editing the files inside the **src/app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
+## Install on your phone
 
-## Get a fresh project
+The app uses native modules (Health Connect, widgets), so it can't run in Expo Go. You need a build. Pick one option.
 
-When you're ready, run:
+**Option A: cloud build, no Android Studio needed (easiest)**
 
 ```bash
-npm run reset-project
+npm install
+npx eas-cli@latest login
+npx eas-cli@latest build -p android --profile preview
 ```
 
-This command will move the starter code to the **example** directory and create a blank **src/app** directory where you can start developing.
+When it finishes, open the link on your phone, download the APK and install it. You'll need to allow installs from your browser. This needs a free Expo account.
 
-### Other setup steps
+**Option B: local build over USB**
 
-- To set up ESLint for linting, run `npx expo lint`, or follow our guide on ["Using ESLint and Prettier"](https://docs.expo.dev/guides/using-eslint/)
-- If you'd like to set up unit testing, follow our guide on ["Unit Testing with Jest"](https://docs.expo.dev/develop/unit-testing/)
-- Learn more about the TypeScript setup in this template in our guide on ["Using TypeScript"](https://docs.expo.dev/guides/typescript/)
+Install Android Studio (it includes the JDK and Android SDK) and turn on USB debugging on the phone. Then:
 
-## Learn more
+```bash
+npm install
+npx expo run:android
+```
 
-To learn more about developing your project with Expo, look at the following resources:
+## First run
 
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
+1. **Settings → Groq AI**: paste a free key from <https://console.groq.com/keys>, then tap **Test**. For local builds you can instead put it in `.env.local` (see `.env.example`).
+2. **Settings → Google Fit and Health Connect → Connect**, then allow what you want shared: nutrition, exercise, weight, steps and active calories. Each one is optional.
+3. **Settings → Reminders**: set your times. The app asks to allow notifications after the first food you log.
+4. **Settings → Home screen widget → Add Quick log**, or long-press the home screen → Widgets → Calorie Tracker.
 
-## Join the community
+## AI models
 
-Join our community of developers creating universal apps.
+The defaults are in `src/lib/settings-schema.ts`: `openai/gpt-oss-20b` for text and `whisper-large-v3-turbo` for voice. Groq retires models from time to time. If a model stops working, the app tells you which one, and you can change it under **Settings → Groq AI → AI models** without rebuilding.
 
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+Your API key is stored with SecureStore on the phone. Don't share an APK built with a `.env` key, because the key can be extracted from it.
+
+## Development
+
+```bash
+npm start            # dev server (needs a development build on the phone)
+npm run typecheck
+npx expo lint
+npm test             # unit tests for the Progress figures, AI parsing, nutrition maths, backup checks, reminders and dates
+npx expo-doctor
+```
+
+| Path | What |
+|---|---|
+| `docs/PRODUCT.md` | What the app is for, the data model, and the definition of every figure on Progress |
+| `src/app/` | Screens (Expo Router): Today, Progress, Settings, Log food, Exercise, Weight, Meal, Edit food, Day |
+| `src/lib/db.ts` | SQLite schema and queries (sync API, also used by the widget) |
+| `src/lib/logging.ts` | Every change to the food, exercise and weight logs goes through here, keeping DB, Health Connect, widget and reminders in step |
+| `src/lib/insights.ts` | The figures on Progress, as pure functions with unit tests |
+| `src/lib/backup.ts`, `backup-format.ts` | Export and restore, and the check a file must pass before anything is replaced |
+| `src/lib/groq.ts`, `ai-parse.ts` | Groq client, prompt, JSON schema and response validation |
+| `src/lib/health.ts` | Health Connect read and write |
+| `src/lib/reminders.ts`, `reminder-plan.ts` | Meal, weigh-in and come-back reminders: scheduling, and which ones are due |
+| `src/widget/` | Widget UI, data and background click handler |
+| `src/constants/theme.ts` | All colours, radii and type sizes (shared with the widget) |
