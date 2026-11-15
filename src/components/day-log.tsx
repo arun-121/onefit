@@ -66,28 +66,35 @@ function MealSection({
     <Group>
       <GroupItem style={styles.header}>
         <Avatar icon={MEAL_ICONS[meal]} tone={hasEntries ? 'secondary' : 'ring'} />
-        <View style={styles.fill}>
-          <AppText variant="titleMedium" emphasized>
-            {MEAL_LABELS[meal]}
-          </AppText>
-          {hasEntries ? (
-            <AppText variant="bodyMedium" color={colors.onSurfaceVariant}>
-              {`${entries.length} item${entries.length > 1 ? 's' : ''}`}
-            </AppText>
-          ) : canCopy ? (
-            // Pulled left by its own padding, so its icon lines up with the meal's name.
-            <Button title="Same as yesterday" icon="content-copy" variant="text" hitSlop={4} onPress={onCopy} style={styles.copy} />
-          ) : (
-            <AppText variant="bodyMedium" color={colors.onSurfaceVariant}>
-              Nothing logged yet
-            </AppText>
-          )}
-        </View>
         {hasEntries ? (
-          <AppText variant="titleMedium" emphasized tabular>
-            {`${formatKcal(total)}\u00A0kcal`}
-          </AppText>
-        ) : null}
+          // The meal and its total. How many items it holds is the rows under it, so it is not
+          // written here as well; a screen reader still hears it, with the total, in one go.
+          <View
+            style={[styles.fill, styles.logged]}
+            accessible
+            accessibilityLabel={`${MEAL_LABELS[meal]}, ${entries.length} item${entries.length > 1 ? 's' : ''}, ${Math.round(total)} calories`}>
+            <AppText variant="titleMedium" emphasized style={styles.fill}>
+              {MEAL_LABELS[meal]}
+            </AppText>
+            <AppText variant="titleMedium" emphasized tabular>
+              {`${formatKcal(total)}\u00A0kcal`}
+            </AppText>
+          </View>
+        ) : (
+          <View style={styles.fill}>
+            <AppText variant="titleMedium" emphasized>
+              {MEAL_LABELS[meal]}
+            </AppText>
+            {canCopy ? (
+              // Pulled left by its own padding, so its icon lines up with the meal's name.
+              <Button title="Same as yesterday" icon="content-copy" variant="text" hitSlop={4} onPress={onCopy} style={styles.copy} />
+            ) : (
+              <AppText variant="bodyMedium" color={colors.onSurfaceVariant}>
+                Nothing logged yet
+              </AppText>
+            )}
+          </View>
+        )}
         <IconButton icon="plus" variant="tonal" label={`Add to ${MEAL_LABELS[meal]}`} onPress={onAdd} />
       </GroupItem>
 
@@ -110,6 +117,8 @@ function MealSection({
 
 const styles = StyleSheet.create({
   fill: { flex: 1, minWidth: 0 },
+  // The name and the total on one line, with the room between them the header row's gap.
+  logged: { flexDirection: 'row', alignItems: 'center', gap: Spacing.lg },
   meals: { gap: Spacing.sm },
   header: {
     flexDirection: 'row',

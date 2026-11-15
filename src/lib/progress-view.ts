@@ -10,7 +10,10 @@
 import { addDays, dateKeyToDate, daysBetween, formatDayLabel, formatShortDate, weekdayIndex } from './dates';
 import { formatMinutes } from './exercise';
 import {
+  PROTEIN_HIT_SHARE,
+  WEEK_SPLIT_MIN_KCAL,
   WEEKDAY_MIN_DAYS,
+  type Card,
   type CalorieBar,
   type CaloriesInfo,
   type ConsistencyInfo,
@@ -19,13 +22,18 @@ import {
   type InsightAction,
   type Insights,
   type MaintenanceInfo,
+  type NotReadyProgress,
   type PatternsInfo,
   type TargetsSuggestion,
   type WeekBlock,
+  type WeekAverages,
+  type WeekSplit,
+  type WeightGoalProgress,
   type WeightInfo,
+  type WeightRate,
 } from './insights';
 import { formatKcal } from './nutrition';
-import { formatKg, formatKgChange } from './weight';
+import { formatKg, formatKgChange, roundKg } from './weight';
 
 // ---------------------------------------------------------------- small helpers
 
@@ -757,6 +765,10 @@ export interface WeekRowText {
   exercise: string;
   /** Set for the week the app was first used in, which covers fewer than 7 days. */
   note: string | null;
+  /** The week's weight as a bare figure ("80.4 kg"), its only weigh-in's when it had one, or null with none. */
+  weightFigure: string | null;
+  /** True when `weightFigure` is a single weigh-in, not an average. */
+  weightOnce: boolean;
   spoken: string;
 }
 
@@ -777,6 +789,8 @@ export function weekRowText(block: WeekBlock, today: string): WeekRowText {
   const meals = hasAverage
     ? `Average ${formatKcal(block.averageKcal ?? 0)} calories a day on ${plural(block.completeDays, 'full day')}`
     : 'Too few full days for an average';
+  const hasAverageKg = block.averageKg !== null && finite(block.averageKg);
+  const hasSingleKg = !hasAverageKg && block.singleKg !== null && finite(block.singleKg);
   return {
     title,
     kcal,
@@ -784,6 +798,8 @@ export function weekRowText(block: WeekBlock, today: string): WeekRowText {
     weight,
     exercise,
     note,
+    weightFigure: hasAverageKg ? formatKg(block.averageKg ?? 0) : hasSingleKg ? formatKg(block.singleKg ?? 0) : null,
+    weightOnce: hasSingleKg,
     spoken: [title, meals, weight, exercise, ...(note ? [note.replace(/\.$/, '')] : [])].join('. ') + '.',
   };
 }
@@ -809,6 +825,10 @@ const GLANCE_NAMES: Record<GlanceKey, string> = { weight: 'Weight', calories: 'C
 /**
  * The four small tiles under the headline, in words. Each repeats one answer its card gives
  * further down; nothing is worked out here. A tile with nothing behind it says what to log.
+ *
+ * None repeats the headline tile right above it: once there is an average, the headline already
+ * shows it, so the calories tile gives the Calories card's other answer, how many full days stayed
+ * within budget, which its small bars (over-budget caps and all) show.
  */
 export function glanceText(insights: Pick<Insights, 'weight' | 'calories' | 'exercise' | 'consistency' | 'period'>): Record<GlanceKey, GlanceText> {
   const today = insights.period.to;
@@ -836,7 +856,7 @@ export function glanceText(insights: Pick<Insights, 'weight' | 'calories' | 'exe
     calories: !c.ready
       ? make('calories', 'Log your meals', 'To see your average against your goal', c.action ?? null)
       : c.average.ready
-        ? make('calories', `${formatKcal(c.average.kcal)} kcal a day`, averageVsGoalText(c.average.vsGoal, c.goal))
+        ? make('calories', `${c.withinBudgetDays} of ${c.completeDays}`, c.completeDays === 1 ? 'Full day within budget' : 'Full days within budget')
         : make('calories', `${plural(c.loggedDays, 'day')} logged`, 'No average yet'),
     exercise: !e.ready
       ? make('exercise', 'Log a workout', 'To see your minutes and top activities', e.action ?? null)
@@ -857,6 +877,14 @@ export interface DayRowText {
   macros: string | null;
   /** Workout, weigh-in, and anything that sets the day apart; null when there is nothing to add. */
   extras: string | null;
+  /** The same as small figures, for drawing: protein, carbs and fat ("112 g"), null for a day without food. */
+  grams: { protein: string; carbs: string; fat: string } | null;
+  /** What sets the day apart, in words, so it is never only a colour: "Over budget", "Not a full day", "No food logged". */
+  flag: string | null;
+  /** The day's exercise: "45 min", or "1 workout" without minutes; null with none. */
+  exercise: string | null;
+  /** The day's weigh-in: "78.4 kg"; null with none. */
+  weight: string | null;
   /** The whole row, for a screen reader. */
   spoken: string;
 }
@@ -877,10 +905,264 @@ export function dayRowText(day: DaySummary, today: string): DayRowText {
   const spoken = [title, ...(day.logged ? [`${formatKcal(day.calories)} calories of a ${formatKcal(day.budget)} budget`, macros ?? ''] : []), ...pieces]
     .filter((part) => part !== '')
     .join(', ');
+  const grams = (n: number) => `${Math.round(finite(n) ? n : 0)} g`;
   return {
     title,
     macros,
     extras: joined ? joined.charAt(0).toUpperCase() + joined.slice(1) : null,
+    grams: day.logged ? { protein: grams(day.protein), carbs: grams(day.carbs), fat: grams(day.fat) } : null,
+    flag: !day.logged ? 'No food logged' : day.over ? 'Over budget' : !day.complete && day.date !== today ? 'Not a full day' : null,
+    exercise: day.workouts > 0 ? (day.exerciseMinutes > 0 ? formatMinutes(day.exerciseMinutes) : plural(day.workouts, 'workout')) : null,
+    weight: day.weightKg !== null && finite(day.weightKg) ? formatKg(day.weightKg) : null,
     spoken: `${spoken}. Opens the day.`,
   };
+}
+
+// ---------------------------------------------------------------- pictures (docs/DESIGN.md, "Show, don't tell")
+
+/**
+ * A change, ready to draw as a delta chip: which way, how much, whether it takes the owner toward
+ * their goal (only then is the chip filled), and the whole of it in words for a screen reader.
+ */
+export interface DeltaView {
+  direction: 'up' | 'down' | 'flat';
+  /** "61 under", "0.5 kg a week". */
+  amount: string;
+  towardGoal: boolean;
+  spoken: string;
+}
+
+/**
+ * An average against the calorie goal as a change: "61 under", "61 over", or "On goal" when level
+ * with it. At or under the goal is within budget, which the app counts as a good day everywhere
+ * else (the cookie on the calendar), so that is the filled chip.
+ */
+export function calorieDelta(vsGoal: number, goal: number): DeltaView {
+  const diff = finite(vsGoal) ? Math.round(vsGoal) : 0;
+  const target = `your ${formatKcal(finite(goal) ? goal : 0)} kcal goal`;
+  if (diff === 0) return { direction: 'flat', amount: 'On goal', towardGoal: true, spoken: `Right on ${target}` };
+  const size = formatKcal(Math.abs(diff));
+  const side = diff < 0 ? 'under' : 'over';
+  return { direction: diff < 0 ? 'down' : 'up', amount: `${size} ${side}`, towardGoal: diff < 0, spoken: `${size} ${side} ${target}` };
+}
+
+/**
+ * The weight rate as a delta chip, only when the weigh-ins support one: a clear rate gets its arrow
+ * and its figure, a steady weight a level chip, and anything less no chip at all (PRODUCT.md: no
+ * rate, no change and no arrow while the rate is not clear).
+ */
+export function weightRateDelta(rate: Card<WeightRate>): DeltaView | null {
+  if (!rate.ready) return null;
+  const said = `${rate.rateText}. ${rate.changeText}.`;
+  if (rate.clear && rate.direction !== 'flat' && rate.direction !== null) {
+    const toward = rate.towardGoal === true;
+    return {
+      direction: rate.direction,
+      amount: `${Math.abs(finite(rate.kgPerWeek) ? rate.kgPerWeek : 0).toFixed(1)} kg a week`,
+      towardGoal: toward,
+      spoken: toward ? `${said} Toward your target.` : said,
+    };
+  }
+  if (rate.steady) return { direction: 'flat', amount: 'Steady', towardGoal: false, spoken: said };
+  return null;
+}
+
+/** "79% of the way from 82.4 kg to 72.0 kg, with 2.2 kg to go.", or how far is left without a starting weight. */
+export function goalProgressText(goal: Pick<WeightGoalProgress, 'kg' | 'startKg' | 'toGoKg' | 'progress' | 'reached'>): string {
+  if (goal.progress !== null && goal.startKg !== null && !goal.reached) {
+    return `${percentText(goal.progress)} of the way from ${formatKg(goal.startKg)} to ${formatKg(goal.kg)}, with ${formatKg(goal.toGoKg)} to go.`;
+  }
+  return `${formatKg(goal.toGoKg)} to go to your ${formatKg(goal.kg)} target.`;
+}
+
+/**
+ * The 7-day view's two weekly averages in one short line: "74.4 kg average this week, 0.4 kg lower
+ * than the week before". The weigh-in counts stay in the full sentence (`WeekAverages.text`).
+ */
+export function weekAveragesLine(wa: Pick<WeekAverages, 'thisWeek' | 'changeKg'>): string {
+  const change = finite(wa.changeKg) ? roundKg(wa.changeKg) : 0;
+  const head = `${formatKg(wa.thisWeek.average)} average this week`;
+  if (change === 0) return `${head}, the same as the week before`;
+  return `${head}, ${Math.abs(change).toFixed(1)} kg ${change < 0 ? 'lower' : 'higher'} than the week before`;
+}
+
+/** Why new targets are offered, in a line: "5.8 kg from the 80.0 kg they were set at". */
+export function recalcLine(r: Pick<TargetsSuggestion, 'fromKg' | 'changeKg'>): string {
+  const moved = finite(r.changeKg) ? Math.abs(roundKg(r.changeKg)) : 0;
+  return `${moved.toFixed(1)} kg from the ${formatKg(r.fromKg)} they were set at`;
+}
+
+/** A figure of the headline tile: the number, what it is, and the change beside it. */
+export interface HeadlineFigure {
+  value: string;
+  unit: string;
+  delta: DeltaView | null;
+}
+
+/**
+ * The headline tile as figures instead of a sentence. It leads with what the sentence leads with
+ * (`buildInsights` makes the same choice, in the same order): the weight change when the weigh-ins
+ * support one, else how few days the average stands on, else the average, else the full days so far
+ * as a meter, else the latest weigh-in, else the exercise. `headline.text` still says all of it.
+ */
+export interface HeadlineView {
+  figure: HeadlineFigure | null;
+  /** A smaller figure under the first: the average intake under a weight change. */
+  second: HeadlineFigure | null;
+  /** At most one line of words, for what a figure cannot say. */
+  line: string | null;
+  /** Set while the average waits for full days. */
+  meter: NotReadyProgress | null;
+}
+
+export function headlineView(insights: Pick<Insights, 'weight' | 'calories' | 'exercise'>): HeadlineView {
+  const { weight, calories, exercise } = insights;
+  const average = calories.ready && calories.average.ready ? calories.average : null;
+  const low = calories.ready && calories.lowCoverage;
+  const none: HeadlineView = { figure: null, second: null, line: null, meter: null };
+  const intakeFigure = (a: { kcal: number; vsGoal: number }, goal: number): HeadlineFigure => ({
+    value: formatKcal(a.kcal),
+    unit: 'kcal a day',
+    delta: calorieDelta(a.vsGoal, goal),
+  });
+
+  if (weight.ready && weight.rate.ready && (weight.rate.clear || weight.rate.steady)) {
+    const rate = weight.rate;
+    const kg = Math.abs(roundKg(finite(rate.changeKg) ? rate.changeKg : 0)).toFixed(1);
+    const figure: HeadlineFigure = rate.clear
+      ? { value: `${rate.direction === 'down' ? '−' : '+'}${kg} kg`, unit: `in ${rate.days} days`, delta: null }
+      : { value: 'Steady', unit: `over ${rate.days} days`, delta: null };
+    if (!average || !calories.ready) return { ...none, figure };
+    if (low) return { ...none, figure, line: `Eating ${formatKcal(average.kcal)} kcal a day on the ${average.days} days logged in full` };
+    return { ...none, figure, second: intakeFigure(average, calories.goal) };
+  }
+  if (calories.ready && average && low) {
+    return {
+      ...none,
+      figure: { value: `${calories.completeDays} of ${calories.countedDays}`, unit: 'days logged in full', delta: null },
+      line: `${formatKcal(average.kcal)} kcal a day on those days`,
+    };
+  }
+  if (calories.ready && average) return { ...none, figure: intakeFigure(average, calories.goal) };
+  if (calories.ready && !calories.average.ready) {
+    const p = calories.average.progress;
+    return { ...none, meter: p ? { ...p, label: 'Full days for an average' } : null };
+  }
+  if (weight.ready) return { ...none, figure: { value: roundKg(weight.latest.kg).toFixed(1), unit: 'kg', delta: null }, line: 'Your latest weigh-in' };
+  if (exercise.ready) return { ...none, figure: { value: formatMinutes(exercise.minutes), unit: 'of exercise', delta: null } };
+  return none;
+}
+
+/**
+ * The scale of "What you actually burn": wide enough for the range, the intake, the goal and the
+ * calculator's figure, with some air either side, in round hundreds.
+ */
+export function burnScale(m: Pick<MaintenanceInfo, 'low' | 'high' | 'averageIntake' | 'goal' | 'formulaKcal'>): { min: number; max: number } {
+  return kcalScale([m.low, m.high, m.averageIntake, m.goal.kcal, m.formulaKcal]);
+}
+
+/**
+ * A scale in kcal for a range bar that holds every one of `values`, with air either side (a fifth
+ * of their spread, and never under 100), in round hundreds. Missing or non-positive values are
+ * skipped; with none left it is 0 to 1.
+ */
+export function kcalScale(values: readonly (number | null | undefined)[]): { min: number; max: number } {
+  const usable = values.filter((v): v is number => finite(v) && v > 0);
+  if (usable.length === 0) return { min: 0, max: 1 };
+  const lo = Math.min(...usable);
+  const hi = Math.max(...usable);
+  const pad = Math.max(100, (hi - lo) * 0.2);
+  return { min: Math.max(0, Math.floor((lo - pad) / 100) * 100), max: Math.ceil((hi + pad) / 100) * 100 };
+}
+
+/**
+ * What the goal means against the burn range, in one line that repeats no number the range bar
+ * draws: the weekly change it works out to, or that it is close to what you burn. The full
+ * sentence, with the gap in kcal, is `goal.text`.
+ */
+export function burnLine(m: Pick<MaintenanceInfo, 'goal'>): string {
+  const { kind, gapKcal, gapKgPerWeek } = m.goal;
+  if (kind === 'maintenance' || !gapKcal || !gapKgPerWeek) return 'Your goal is close to what you burn';
+  const verb = kind === 'deficit' ? 'lost' : 'gained';
+  const { min, max } = gapKgPerWeek;
+  if (!(max >= 0.1)) {
+    const gap = gapKcal.min === gapKcal.max ? formatKcal(gapKcal.max) : `${formatKcal(gapKcal.min)} to ${formatKcal(gapKcal.max)}`;
+    return `Your goal is ${gap} kcal ${kind === 'deficit' ? 'less' : 'more'} than you burn`;
+  }
+  if (min === max) return `About ${max.toFixed(1)} kg ${verb} a week at your goal`;
+  if (min < 0.1) return `Up to ${max.toFixed(1)} kg ${verb} a week at your goal`;
+  return `About ${min.toFixed(1)} to ${max.toFixed(1)} kg ${verb} a week at your goal`;
+}
+
+/** One day on the protein dots: reached, a full day short of it, today (still open), or a day that is not a full day. */
+export type ProteinDayMark = 'hit' | 'miss' | 'today' | 'empty';
+
+/**
+ * Each day the charts cover, as a protein dot: a full day that reached 90% of the protein goal is a
+ * hit, a full day short of it a miss, today is still open, and any other day does not count. The
+ * hits are the Macros card's `proteinDays`. Labels (the weekday's initial) are given for a week.
+ */
+export function proteinDayMarks(
+  days: readonly Pick<DaySummary, 'date' | 'complete' | 'protein'>[],
+  period: Pick<Period, 'chartFrom' | 'chartDays' | 'to'>,
+  proteinGoal: number,
+): { marks: ProteinDayMark[]; labels: string[] | null; hits: number; full: number } {
+  const byDate = new Map(days.map((d) => [d.date, d]));
+  const count = finite(period.chartDays) && period.chartDays > 0 ? Math.round(period.chartDays) : 0;
+  const dates = Array.from({ length: count }, (_, i) => addDays(period.chartFrom, i));
+  const needed = PROTEIN_HIT_SHARE * (finite(proteinGoal) ? proteinGoal : 0);
+  let hits = 0;
+  let full = 0;
+  const marks = dates.map((date): ProteinDayMark => {
+    const day = byDate.get(date);
+    if (day?.complete) {
+      full += 1;
+      if (proteinGoal > 0 && day.protein >= needed) {
+        hits += 1;
+        return 'hit';
+      }
+      return 'miss';
+    }
+    return date === period.to ? 'today' : 'empty';
+  });
+  return { marks, labels: count <= 7 ? dates.map((d) => WEEKDAY_INITIALS[weekdayIndex(d)]) : null, hits, full };
+}
+
+/** The meals' calories a day, for the words behind the split bar: "Breakfast 453 kcal a day, 23%; ...". */
+export function mealsSpoken(meals: readonly Pick<PatternsInfo['meals'][number], 'label' | 'average' | 'share'>[]): string {
+  return `Calories by meal: ${meals.map((m) => `${m.label}, ${percentText(m.share)}, ${formatKcal(m.average)} kcal a day`).join('; ')}.`;
+}
+
+/**
+ * The one line under the Weight card's figure: the 7-day view's two weekly averages; a rate that is
+ * there but not clear, in its own words ("No clear direction yet"); or, before there is a rate, the
+ * plain change between the first and latest weigh-in, as `latestWeighInText` gives it. Null when
+ * the figure and its chip say it all.
+ */
+export function weightLine(w: Pick<WeightInfo, 'latest' | 'first' | 'rawChangeKg' | 'rate' | 'weekAverages'>, today: string): string | null {
+  if (w.weekAverages) return weekAveragesLine(w.weekAverages);
+  if (w.rate.ready) return w.rate.clear || w.rate.steady ? null : w.rate.rateText;
+  if (w.rate.action === 'longer-period' || w.rawChangeKg === null || !finite(w.rawChangeKg)) return null;
+  return `${formatKgChange(w.rawChangeKg)} since ${formatShortDate(w.first.date, dateKeyToDate(today))} (${formatKg(w.first.kg)})`;
+}
+
+/**
+ * Weekdays against weekends in a line that repeats neither average (the range bar draws both): the
+ * difference when it is clear, "about the same" under 100 kcal apart, and otherwise that it is too
+ * early, exactly as `WeekSplit.text` decides.
+ */
+export function weekSplitLine(split: Pick<WeekSplit, 'difference' | 'clear'>): string {
+  const diff = finite(split.difference) ? Math.round(split.difference) : 0;
+  if (split.clear) return `${formatKcal(Math.abs(diff))} kcal ${diff > 0 ? 'more' : 'less'} a day at weekends`;
+  if (Math.abs(diff) < WEEK_SPLIT_MIN_KCAL) return 'About the same so far';
+  return 'Too few days to tell them apart yet';
+}
+
+/** How the recalculated calories compare with the current goal, as a quiet chip; null when they are the same. */
+export function targetsDelta(r: Pick<TargetsSuggestion, 'calorieChange'>): DeltaView | null {
+  const change = finite(r.calorieChange) ? Math.round(r.calorieChange) : 0;
+  if (change === 0) return null;
+  const size = formatKcal(Math.abs(change));
+  const side = change < 0 ? 'less' : 'more';
+  return { direction: change < 0 ? 'down' : 'up', amount: `${size} ${side}`, towardGoal: false, spoken: `${size} kcal ${side} a day than now` };
 }

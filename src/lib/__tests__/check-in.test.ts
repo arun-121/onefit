@@ -1,5 +1,5 @@
 /// <reference types="jest" />
-import { CHECK_IN_MAX_STEP_KCAL, weeklyCheckIn, type CheckInInput } from '../check-in';
+import { CHECK_IN_MAX_STEP_KCAL, checkInScale, weeklyCheckIn, type CheckInInput } from '../check-in';
 import type { MaintenanceCard } from '../insights';
 
 const maintenance = (kcal: number, confidence: 'rough' | 'fair' | 'good' = 'good') =>
@@ -51,5 +51,29 @@ describe('weeklyCheckIn', () => {
     expect(weeklyCheckIn({ ...base, currentKg: null })).toBeNull();
     expect(weeklyCheckIn({ ...base, maintenance: maintenance(2600, 'rough') })).toBeNull();
     expect(weeklyCheckIn({ ...base, maintenance: { ready: false, reason: 'x' } })).toBeNull();
+  });
+
+  it('carries the numbers its card draws: the burn range, the targets before, and one short line', () => {
+    const c = weeklyCheckIn(base)!;
+    expect(c).toMatchObject({ burnLow: 2500, burnHigh: 2700, confidence: 'good', current: base.goals });
+    expect(c.line).toBe('To lose 0.5 kg a week.');
+    expect(weeklyCheckIn({ ...base, maintenance: maintenance(3400) })!.line).toBe('To lose 0.5 kg a week, one 250 kcal step a week.');
+    // On track, the card's chip says the target still fits, so the line only says what it is for; the body keeps the whole sentence.
+    const onTrack = weeklyCheckIn({ ...base, goals: { ...base.goals, calories: 2060 } })!;
+    expect(onTrack.line).toBe('To lose 0.5 kg a week.');
+    expect(onTrack.body).toMatch(/target still fits\.$/);
+  });
+});
+
+describe('checkInScale', () => {
+  it('spans the burn range and both targets in whole hundreds, with room at each end', () => {
+    const c = weeklyCheckIn(base)!;
+    // 2,050 to 2,700, padded by 15% of that or 100, whichever is more.
+    expect(checkInScale(c)).toEqual({ min: 1900, max: 2800 });
+    const scale = checkInScale({ burnLow: 2450, burnHigh: 2750, targets: { ...base.goals, calories: 2050 }, current: { ...base.goals, calories: 2200 } });
+    for (const v of [2050, 2200, 2450, 2750]) {
+      expect(v).toBeGreaterThan(scale.min);
+      expect(v).toBeLessThan(scale.max);
+    }
   });
 });

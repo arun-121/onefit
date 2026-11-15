@@ -3,7 +3,8 @@ import { useCallback, useRef, useState, type ComponentRef } from 'react';
 import { ActivityIndicator, KeyboardAvoidingView, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { AppText, Avatar, Button, Chip, IconButton, ScreenHeader } from '@/components/ui';
+import { Note } from '@/components/sheet-parts';
+import { AppText, Avatar, Button, Chip, IconButton, ScreenHeader, type IconName } from '@/components/ui';
 import { Shape, Spacing, Type, withAlpha } from '@/constants/theme';
 import { useLiveQuery, useToday } from '@/hooks/use-live-query';
 import { useTheme } from '@/hooks/use-theme';
@@ -11,6 +12,19 @@ import { assistantSystemPrompt, cleanReply, historyForModel, STARTER_QUESTIONS, 
 import { loadAssistantDigest, loadChat, saveChat } from '@/lib/assistant-data';
 import { askAssistant, getApiKey, GroqError } from '@/lib/groq';
 import { getSettings } from '@/lib/settings';
+
+/**
+ * A small icon for each starter question, in the subject's own symbol, so the list can be scanned
+ * by picture: the month, food, calories, protein, weight, one change.
+ */
+const STARTER_ICONS: Partial<Record<string, IconName>> = {
+  'How am I doing this month?': 'calendar-month-outline',
+  'What should I eat for the rest of today?': 'silverware-fork-knife',
+  'Where do my calories come from?': 'fire',
+  'How can I get more protein?': 'egg-outline',
+  'Is my weight going the right way?': 'scale-bathroom',
+  'What one thing should I change this week?': 'lightbulb-on-outline',
+};
 
 /** A message stamped with the time it was made. */
 function message(role: ChatMessage['role'], text: string, error = false): ChatMessage {
@@ -101,7 +115,7 @@ export default function AssistantScreen() {
                 Add your Groq API key
               </AppText>
               <AppText variant="bodyMedium" color={colors.onSurfaceVariant}>
-                The assistant answers through Groq, the same as food logging. Add the key in Settings to ask questions.
+                Answers come through Groq, like food logging
               </AppText>
               <Button title="Open Settings" variant="tonal" onPress={() => navigate('/settings')} style={styles.end} />
             </View>
@@ -109,20 +123,26 @@ export default function AssistantScreen() {
 
           {messages.length === 0 ? (
             <View style={styles.empty}>
-              <View style={[styles.intro, { backgroundColor: colors.primaryContainer }]}>
+              {/* A title and one line. What the answers draw on is the header's line; privacy is one line of its own. */}
+              <View
+                style={[styles.intro, { backgroundColor: colors.primaryContainer }]}
+                accessible
+                accessibilityLabel="Ask about your food, weight and training. Answers come from your own logs: what you eat, how your weight is moving and what you really burn.">
                 <Avatar icon="auto-fix" tint={colors.onPrimaryContainer} />
                 <AppText variant="titleLarge" emphasized color={colors.onPrimaryContainer}>
-                  Ask about your food, weight and training
+                  Ask about your fitness
                 </AppText>
                 <AppText variant="bodyMedium" color={colors.onPrimaryContainer}>
-                  Answers come from your own logs: what you eat, how your weight is moving and what you really burn. Your
-                  logs stay on this phone; each question sends a summary of them to Groq.
+                  Food, weight and training, from your own logs
                 </AppText>
               </View>
               <View style={styles.starters}>
                 {STARTER_QUESTIONS.map((q) => (
-                  <Chip key={q} kind="suggestion" label={q} onPress={() => void ask(q)} />
+                  <Chip key={q} kind="suggestion" icon={STARTER_ICONS[q] ?? 'auto-fix'} label={q} onPress={() => void ask(q)} />
                 ))}
+              </View>
+              <View accessible accessibilityLabel="Your logs stay on this phone. Each question sends a summary of them to Groq." style={styles.privacy}>
+                <Note icon="lock-outline">Logs stay on this phone. Groq gets a summary.</Note>
               </View>
             </View>
           ) : (
@@ -181,7 +201,10 @@ export default function AssistantScreen() {
             />
           </View>
           <View style={styles.send}>
-            <IconButton icon="send" label="Send" variant="filled" disabled={!canSend} onPress={() => void ask(draft)} />
+            {/* Filled once there is something to send. Until then a plain icon in the disabled colour, as
+                Material draws a disabled icon button; a disabled icon on the primary fill would read as
+                a broken button. */}
+            <IconButton icon="send" label="Send" variant={canSend ? 'filled' : 'standard'} disabled={!canSend} onPress={() => void ask(draft)} />
           </View>
         </View>
       </KeyboardAvoidingView>
@@ -195,6 +218,8 @@ const styles = StyleSheet.create({
   empty: { gap: Spacing.lg },
   intro: { borderRadius: Shape.extraLarge, padding: Spacing.xl, gap: Spacing.md },
   starters: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.sm },
+  // Lined up with the chips' labels rather than their edge.
+  privacy: { paddingHorizontal: Spacing.xs },
   thread: { gap: Spacing.xl },
   question: {
     alignSelf: 'flex-end',

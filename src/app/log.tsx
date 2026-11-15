@@ -6,7 +6,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ShapeAvatar } from '@/components/expressive';
 import { ItemEditor, MealPicker } from '@/components/item-editor';
-import { Note, SheetHeader } from '@/components/sheet-parts';
+import { MacroFigures, Note, SheetHeader } from '@/components/sheet-parts';
 import { AppText, Button, Group, GroupRow, Icon, SectionHeader, SegmentedButtons, Tappable, TextField } from '@/components/ui';
 import { VOICE_LOGGING } from '@/constants/features';
 import { Alpha, Shape, Spacing, withAlpha } from '@/constants/theme';
@@ -291,7 +291,7 @@ export default function LogScreen() {
               placeholder="2 eggs, toast with butter, black coffee"
               multiline
               autoFocus={initialMode === 'text'}
-              supportingText="Amounts make the estimate more accurate."
+              supportingText="Amounts make it more accurate"
             />
             <View style={styles.actions}>
               <Button title="Estimate calories" icon="auto-fix" size="large" disabled={!text.trim()} onPress={() => void estimateText(text, 'text')} />
@@ -338,11 +338,10 @@ export default function LogScreen() {
       {phase === 'review' ? (
         // The total and the one main action stay in reach under the list, however long it is.
         <View style={[styles.bottomBar, { paddingBottom: insets.bottom + Spacing.lg, backgroundColor: colors.surfaceContainer }]}>
+          {/* The meal's one number, and what it is made of as three figures in their category colours. */}
           <View style={styles.total}>
             <AppText variant="titleLarge" emphasized tabular>{`${formatKcal(total.calories)} kcal`}</AppText>
-            <AppText variant="bodyMedium" color={colors.onSurfaceVariant}>
-              {`${Math.round(total.protein)} g protein, ${Math.round(total.carbs)} g carbs, ${Math.round(total.fat)} g fat`}
-            </AppText>
+            <MacroFigures totals={total} />
           </View>
           <Button title={`Add to ${mealName}`} size="large" loading={saving} onPress={() => void save()} />
         </View>
@@ -376,13 +375,6 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: Shape.extraLarge,
     borderTopRightRadius: Shape.extraLarge,
   },
-  // The figure at the left and what it is made of at the right; at a large font size the second wraps under the first.
-  total: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    alignItems: 'baseline',
-    justifyContent: 'space-between',
-    columnGap: Spacing.md,
-    paddingHorizontal: Spacing.xs,
-  },
+  // The figure, and what it is made of under it.
+  total: { gap: Spacing.xs, paddingHorizontal: Spacing.xs },
 });

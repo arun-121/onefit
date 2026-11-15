@@ -59,6 +59,9 @@ describe('coachTip', () => {
     const tip = coachTip({ ...base, goal: 'build_muscle', hour: 19, eaten: { ...base.eaten, protein: 135 } })!;
     expect(tip.title).toBe('1,000 kcal left to eat');
     expect(tip.suggestions.length).toBeGreaterThan(0);
+    // The full protein bar says protein is in; the line says only what the bar cannot.
+    expect(tip).toMatchObject({ kind: 'surplus', figure: { value: '1,000 kcal', unit: 'left to eat' }, protein: { eaten: 135, goal: 140 } });
+    expect(tip.line).toBe('Building muscle needs the surplus too.');
   });
 
   it('says protein is reached once it is', () => {
@@ -72,5 +75,40 @@ describe('coachTip', () => {
     expect(coachTip({ ...base, hour: 15, entryCount: 0, eaten: { calories: 0, protein: 0, carbs: 0, fat: 0 } })!.title).toBe(
       'Nothing logged yet today',
     );
+  });
+
+  it('gives the card its figure, the protein bar and the calories left', () => {
+    const tip = coachTip(base)!;
+    expect(tip).toMatchObject({
+      kind: 'protein',
+      figure: { value: '90 g', unit: 'protein to go' },
+      protein: { eaten: 50, goal: 140 },
+      kcalLeft: 1000,
+      // The chips are the answer, so there is no line on a lose-fat day.
+      line: null,
+    });
+    expect(coachTip({ ...base, goal: 'recomp' })!.line).toBe('Protein is what turns your training into muscle.');
+    expect(coachTip({ ...base, foods: [] })!.line).toMatch(/fit best\.$/);
+  });
+
+  it('says a day over budget as a figure and a short line, without a protein bar', () => {
+    const over = coachTip({ ...base, eaten: { ...base.eaten, calories: 2500 } })!;
+    expect(over).toMatchObject({ kind: 'over', figure: { value: '300 kcal', unit: 'over today' }, protein: null, kcalLeft: -300 });
+    expect(over.line).toBe('Your weekly average is what moves your weight.');
+  });
+
+  it('keeps every short line to about one line on a phone', () => {
+    const tips = [
+      coachTip(base),
+      coachTip({ ...base, foods: [] }),
+      coachTip({ ...base, goal: 'build_muscle', eaten: { ...base.eaten, calories: 2500 } }),
+      coachTip({ ...base, goal: 'maintain', eaten: { ...base.eaten, calories: 2500 } }),
+      coachTip({ ...base, goal: 'build_muscle', hour: 19, eaten: { ...base.eaten, protein: 135 } }),
+      coachTip({ ...base, eaten: { ...base.eaten, protein: 141 } }),
+      coachTip({ ...base, hour: 8, entryCount: 0, eaten: { calories: 0, protein: 0, carbs: 0, fat: 0 } }),
+      coachTip({ ...base, hour: 15, entryCount: 0, eaten: { calories: 0, protein: 0, carbs: 0, fat: 0 } }),
+    ];
+    for (const t of tips) expect((t!.line ?? '').length).toBeLessThanOrEqual(66);
+    expect(tips[5]).toMatchObject({ kind: 'protein-done', figure: { value: '141 g', unit: 'protein, goal reached' }, protein: { eaten: 141, goal: 140 } });
   });
 });

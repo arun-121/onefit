@@ -3,11 +3,10 @@ import { StyleSheet, View } from 'react-native';
 
 import { ButtonGroup } from '@/components/expressive';
 import { dayWords } from '@/components/screen-text';
-import { Sheet, SheetHeader } from '@/components/sheet-parts';
+import { MacroFigures, Sheet, SheetHeader } from '@/components/sheet-parts';
 import { useSnackbar } from '@/components/snackbar';
 import { foodIcon } from '@/components/today-tiles';
 import { AppText, Button, Group, GroupRow } from '@/components/ui';
-import { categoryColors } from '@/constants/category-colors';
 import { VOICE_LOGGING } from '@/constants/features';
 import { Shape, Spacing } from '@/constants/theme';
 import { useLiveQuery, useToday } from '@/hooks/use-live-query';
@@ -107,23 +106,15 @@ export default function MealSheet() {
 
 /**
  * What the meal adds up to, as the sheet's value box: the calories as the one large number, and
- * protein, carbs and fat underneath, each with its own category colour.
+ * beside it protein, carbs and fat as the same figures every sheet draws them with (`MacroFigures`),
+ * one under another, each with its category colour.
  */
 function MealTotals({ totals }: { totals: Macros }) {
-  const { colors, dark } = useTheme();
-  const palette = categoryColors(colors.primary, dark);
+  const { colors } = useTheme();
   const on = colors.onPrimaryContainer;
-  const macros = [
-    { label: 'Protein', grams: Math.round(totals.protein), color: palette.protein.color },
-    { label: 'Carbs', grams: Math.round(totals.carbs), color: palette.carbs.color },
-    { label: 'Fat', grams: Math.round(totals.fat), color: palette.fat.color },
-  ];
   return (
-    <View
-      style={[styles.totals, { backgroundColor: colors.primaryContainer }]}
-      accessible
-      accessibilityLabel={`${formatKcal(totals.calories)} calories. ${macros.map((m) => `${m.grams} grams ${m.label.toLowerCase()}`).join(', ')}`}>
-      <View style={styles.figure}>
+    <View style={[styles.totals, { backgroundColor: colors.primaryContainer }]}>
+      <View style={styles.figure} accessible accessibilityLabel={`${formatKcal(totals.calories)} calories`}>
         <AppText variant="displayMedium" emphasized tabular color={on} numberOfLines={1} maxFontSizeMultiplier={1.3}>
           {formatKcal(totals.calories)}
         </AppText>
@@ -132,26 +123,15 @@ function MealTotals({ totals }: { totals: Macros }) {
         </AppText>
       </View>
       <View style={styles.macros}>
-        {macros.map((m) => (
-          <View key={m.label} style={styles.macro}>
-            <View style={[styles.dot, { backgroundColor: m.color }]} />
-            <AppText variant="bodyMedium" color={on} numberOfLines={1} style={styles.fill}>
-              {m.label}
-            </AppText>
-            <AppText variant="labelLarge" emphasized tabular color={on} numberOfLines={1}>
-              {`${m.grams}\u00A0g`}
-            </AppText>
-          </View>
-        ))}
+        <MacroFigures totals={totals} color={on} stacked />
       </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  fill: { flex: 1, minWidth: 0 },
   block: { gap: Spacing.sm },
-  // The number at the left, and what it is made of as a small table at the right.
+  // The number at the left, and what it is made of, one macro under another, at the right.
   totals: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -161,7 +141,5 @@ const styles = StyleSheet.create({
     borderRadius: Shape.extraLarge,
   },
   figure: { flex: 1, minWidth: 0 },
-  macros: { flex: 1, minWidth: 0, gap: Spacing.xs },
-  macro: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
-  dot: { width: Spacing.sm, height: Spacing.sm, borderRadius: Shape.full },
+  macros: { flex: 1, minWidth: 0 },
 });

@@ -1,21 +1,24 @@
 /**
- * The Progress tab's cards, in Today's language (docs/DESIGN.md, "Progress").
+ * The Progress tab's cards, in Today's language (docs/DESIGN.md, "Progress"), speaking in pictures
+ * (DESIGN.md, "Show, don't tell (version 3)").
  *
- * Three kinds of container, so the page is not a column of identical boxes:
- *  - a chart card (28dp) opens with the answer to one question (where is my weight heading, what
- *    do I really eat, what do I really burn) in `titleLarge` emphasised, and only then shows the
- *    chart and the numbers behind it;
- *  - a ranked or repeated list (week by week, calories by meal, top activities, top foods, every
- *    day) is a segmented group of rows with round avatars and no card around it;
- *  - a pair of small facts is two 20dp tiles side by side.
+ * Every card answers with one figure, one picture that shows where the figure sits, and at most one
+ * line of words. What a card used to say in paragraphs (how a figure is worked out, what it leaves
+ * out, what a word means) is one tap away under "How it's worked out" at its foot, and every picture
+ * carries the sentence it replaced as its spoken label, so nothing honest is lost (PRODUCT.md).
+ *
+ * The pictures are the shared vocabulary in `glance.tsx`, each used for one kind of fact: a delta
+ * chip for a change, a range bar for a value against a range, a split bar for a share of a whole,
+ * day dots for days hit or missed, a small ring for progress to a target, a stat row for a few
+ * counts, an unlock meter for data still to come, and bar rows for ranked items. The weight line
+ * chart stays the screen's one memorable picture.
  *
  * The headline is the screen's one focal tile, in `primaryContainer`; everything else is quiet.
  * Colour tells the subject: food and weight in the primary, movement in the tertiary, the streak in
- * the secondary. A tile or row with nothing behind it yet is unlit: a ring avatar, what to log, and
- * a plus.
+ * the secondary, protein, carbs and fat in their category colours.
  *
- * Every figure and every sentence with a number in it comes from `lib/insights.ts`; the wording
- * that joins them is in `lib/progress-view.ts`. Nothing is worked out here.
+ * Every figure comes from `lib/insights.ts`; the wording and the shape of each picture's data from
+ * `lib/progress-view.ts`. Nothing is worked out here.
  */
 import type { ReactNode } from 'react';
 import { StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
@@ -30,6 +33,7 @@ import {
   whatShowsUpHere,
   type CaloriesInfo,
   type ConsistencyInfo,
+  type DaySummary,
   type ExerciseInfo,
   type InsightAction,
   type Insights,
@@ -38,6 +42,7 @@ import {
   type MaintenanceInfo,
   type NotReady,
   type PatternsInfo,
+  type TargetsSuggestion,
   type TopFood,
   type Unlock,
   type WeekBlock,
@@ -46,8 +51,10 @@ import {
 import { formatKcal } from '@/lib/nutrition';
 import {
   averageVsGoalText,
-  biggestMealText,
+  burnLine,
+  burnScale,
   calorieChartBars,
+  calorieDelta,
   chartRows,
   describeCalendar,
   describeCalorieChart,
@@ -56,52 +63,52 @@ import {
   describeWeightChart,
   exerciseChartBars,
   glanceText,
-  latestWeighInText,
+  goalProgressText,
+  headlineView,
+  kcalScale,
   maintenanceBasisText,
+  mealsSpoken,
   percentText,
   periodAxis,
   plural,
+  proteinDayMarks,
+  recalcLine,
   recalcSummary,
   relativeToLargest,
-  splitAnswer,
+  targetsDelta,
   weekdayChartBars,
   weekRowText,
+  weekSplitLine,
   weightChartMarks,
+  weightLine,
+  weightRateDelta,
   WEEKDAY_AXIS,
+  type DeltaView,
   type GlanceKey,
+  type HeadlineFigure,
 } from '@/lib/progress-view';
-import { formatKg } from '@/lib/weight';
-import {
-  BarChart,
-  CalendarGrid,
-  DOT_ALPHA,
-  FADED_ALPHA,
-  Legend,
-  LineChart,
-  MiniBars,
-  MiniLineChart,
-  ProportionBar,
-  StackedBar,
-  TENTATIVE_ALPHA,
-  type LegendEntry,
-} from './charts';
+import { formatKg, roundKg } from '@/lib/weight';
+import { BarChart, CalendarGrid, DOT_ALPHA, FADED_ALPHA, Legend, LineChart, MiniBars, MiniLineChart, ProportionBar, TENTATIVE_ALPHA, type LegendEntry } from './charts';
 import { ShapeAvatar } from './expressive';
-import { keepUnits } from './screen-text';
-import { foodIcon, MEAL_ICONS } from './today-tiles';
 import {
-  AppText,
-  Avatar,
-  Button,
-  Group,
-  GroupItem,
-  GroupRow,
-  Icon,
-  SectionHeader,
-  Tappable,
-  type AvatarTone,
-  type GroupCorners,
-  type IconName,
-} from './ui';
+  BarRows,
+  DayDots,
+  Disclosure,
+  GlanceFigure,
+  RangeBar,
+  shadesOf,
+  SmallRing,
+  SplitBar,
+  StatRow,
+  UnlockMeter,
+  type DeltaChipProps,
+  type GlanceTone,
+  type RangeMark,
+  type StatCell,
+} from './glance';
+import { keepUnits } from './screen-text';
+import { foodIcon } from './today-tiles';
+import { AppText, Avatar, Button, Group, GroupItem, GroupRow, Icon, SectionHeader, Tappable, type AvatarTone, type GroupCorners, type IconName } from './ui';
 
 export type InsightActionHandler = (action: InsightAction) => void;
 
@@ -136,6 +143,21 @@ const ACTION_CUE: Record<InsightAction, IconName> = {
   'longer-period': 'calendar-range',
 };
 
+const DELTA_ICON: Record<DeltaView['direction'], IconName> = { up: 'arrow-up', down: 'arrow-down', flat: 'trending-neutral' };
+
+/** A change from `progress-view` as the kit's delta chip, in the subject's tone. */
+const toChip = (d: DeltaView | null, tone: 'primary' | 'tertiary' = 'primary'): DeltaChipProps | undefined =>
+  d ? { direction: d.direction, amount: d.amount, towardGoal: d.towardGoal, tone, accessibilityLabel: d.spoken } : undefined;
+
+/**
+ * The last two words held together, so a line in a half-width tile never ends on one word alone at
+ * a large font size ("Losing 0.5 kg a / week" becomes "Losing 0.5 kg / a week").
+ */
+const noOrphan = (text: string): string => text.replace(/ (\S+)$/, ' $1');
+
+/** Lines for a card's foot, without the empty ones. */
+const lines = (...all: (string | null | undefined | false)[]): string[] => all.filter((l): l is string => typeof l === 'string' && l.length > 0);
+
 // ---------------------------------------------------------------- building blocks
 
 /** The icon at the end of an unlit row or tile. Only a cue: the whole surface is the button. */
@@ -147,19 +169,105 @@ function Cue({ icon = 'plus', color }: { icon?: IconName; color?: string }) {
   );
 }
 
-/** A chart card: 28dp corners, one question, its answer first. */
+/** A chart card: 28dp corners, its figure first, its picture, at most one line, then its foot. */
 function ChartCard({ children }: { children: ReactNode }) {
   const { colors } = useTheme();
   return <View style={[styles.card, { backgroundColor: colors.surfaceContainerHigh }]}>{children}</View>;
 }
 
+/** The foot of a card: the words it used to carry, one tap away. Nothing when there is nothing to say. */
+function HowItsWorkedOut({ paragraphs, title }: { paragraphs: string[]; title?: string }) {
+  if (paragraphs.length === 0) return null;
+  return <Disclosure title={title}>{paragraphs}</Disclosure>;
+}
+
+/** The one line a card may have: what its picture means, in the owner's words. */
+function Line({ children, strong }: { children: string; strong?: boolean }) {
+  const { colors } = useTheme();
+  return (
+    <AppText variant={strong ? 'bodyLarge' : 'bodyMedium'} color={strong ? colors.onSurface : colors.onSurfaceVariant}>
+      {keepUnits(children)}
+    </AppText>
+  );
+}
+
+/** The small name over one picture of a card that has more than one. */
+function SubLabel({ children }: { children: string }) {
+  const { colors } = useTheme();
+  return (
+    <AppText variant="labelLarge" color={colors.onSurfaceVariant}>
+      {children}
+    </AppText>
+  );
+}
+
+/** The one next step of a card: a quiet tonal pill, 40dp with a 48dp target. */
+function ActionButton({ action, onAction, spoken }: { action: InsightAction; onAction: InsightActionHandler; spoken?: string }) {
+  return (
+    <Button
+      variant="tonal"
+      title={ACTION_LABEL[action]}
+      icon={ACTION_ICON[action]}
+      onPress={() => onAction(action)}
+      hitSlop={4}
+      accessibilityLabel={spoken}
+      style={styles.start}
+    />
+  );
+}
+
 /**
- * A card that cannot be shown yet, as one unlit row: a ring avatar, what to do in the headline, the
- * reason under it and a cue at the end. The whole row is the button. With nothing to do but wait,
- * it is the reason alone.
+ * A step that only switches to the month: the card's own picture and its "From the last 30 days"
+ * line already point there, so the sentence saying a week is too short is in the card's foot.
  */
-function NotReadyTile({ icon, card, onAction }: { icon: IconName; card: NotReady; onAction: InsightActionHandler }) {
+const onlyNeedsMonth = (card: NotReady): boolean => card.action === 'longer-period' && !card.progress;
+
+/**
+ * A figure that is not ready yet. When what it waits for is a count, it is a meter of what there is
+ * against what it needs, with the step that adds to it; its reason is the meter's spoken label (and
+ * goes in the card's foot). When the step is only "Show 30 days", the button alone, its reason
+ * spoken with it and written in the foot. Otherwise the reason in one line, and the step.
+ */
+function Pending({ card, onAction, tone, quiet }: { card: NotReady; onAction: InsightActionHandler; tone?: GlanceTone; quiet?: boolean }) {
+  // `quiet`: the card already offers this step once, so this one only says why.
+  const action = quiet ? undefined : card.action;
+  if (action && onlyNeedsMonth(card)) return <ActionButton action={action} onAction={onAction} spoken={`${card.reason} ${ACTION_LABEL[action]}`} />;
+  if (card.progress) {
+    return (
+      <UnlockMeter
+        have={card.progress.have}
+        need={card.progress.need}
+        label={card.progress.label}
+        tone={tone}
+        action={action ? { label: ACTION_LABEL[action], icon: ACTION_ICON[action], onPress: () => onAction(action) } : undefined}
+        accessibilityLabel={card.reason}
+      />
+    );
+  }
+  return (
+    <View style={styles.block}>
+      <Line>{card.reason}</Line>
+      {action ? <ActionButton action={action} onAction={onAction} /> : null}
+    </View>
+  );
+}
+
+/**
+ * A card that cannot be shown yet. Waiting on a count, it is a small card with the meter and its one
+ * step, and the reason under "What it takes". Otherwise one unlit row: a ring avatar, what to do in
+ * the headline, the reason under it and a cue at the end; the whole row is the button. With nothing
+ * to do but wait, it is the reason alone.
+ */
+function NotReadyTile({ icon, card, onAction, tone }: { icon: IconName; card: NotReady; onAction: InsightActionHandler; tone?: GlanceTone }) {
   const action = card.action;
+  if (card.progress) {
+    return (
+      <ChartCard>
+        <Pending card={card} onAction={onAction} tone={tone} />
+        <HowItsWorkedOut title="What it takes" paragraphs={[card.reason]} />
+      </ChartCard>
+    );
+  }
   if (!action) {
     return (
       <Group>
@@ -187,174 +295,6 @@ function NotReadyTile({ icon, card, onAction }: { icon: IconName; card: NotReady
   );
 }
 
-/** A quiet line of small print: what a figure leaves out, or how it was worked out. */
-function Note({ children, icon = 'information-outline' }: { children: string; icon?: IconName }) {
-  const { colors } = useTheme();
-  return (
-    <View style={styles.note}>
-      <Icon name={icon} size={16} color={colors.onSurfaceVariant} />
-      <AppText variant="bodySmall" color={colors.onSurfaceVariant} style={styles.fill}>
-        {keepUnits(children)}
-      </AppText>
-    </View>
-  );
-}
-
-/** The one next step of a card: a quiet tonal pill, 40dp with a 48dp target. */
-function ActionButton({ action, onAction }: { action: InsightAction; onAction: InsightActionHandler }) {
-  return <Button variant="tonal" title={ACTION_LABEL[action]} icon={ACTION_ICON[action]} onPress={() => onAction(action)} hitSlop={4} style={styles.start} />;
-}
-
-/** One figure on a ready card that is not ready itself: the reason, and the step that unlocks it. */
-function Pending({ card, onAction }: { card: NotReady; onAction?: InsightActionHandler }) {
-  const action = card.action;
-  return (
-    <View style={styles.block}>
-      <Note>{card.reason}</Note>
-      {action && onAction ? <ActionButton action={action} onAction={onAction} /> : null}
-    </View>
-  );
-}
-
-/** A card's answer in words, with what it adds up from in a quiet line under it. */
-function Answer({ title, detail }: { title: string; detail?: string | null }) {
-  const { colors } = useTheme();
-  return (
-    <View style={styles.answer}>
-      <AppText variant="titleLarge" emphasized>
-        {keepUnits(title)}
-      </AppText>
-      {detail ? (
-        <AppText variant="bodyMedium" color={colors.onSurfaceVariant}>
-          {keepUnits(detail)}
-        </AppText>
-      ) : null}
-    </View>
-  );
-}
-
-/**
- * A card's answer as a number: the value, its unit on the same line, then what it stands on.
- * `range` is for a figure known only to within two ends, and is set as part of the answer.
- */
-function Figure({ value, unit, range, lines = [] }: { value: string; unit?: string; range?: string; lines?: (string | null)[] }) {
-  const { colors } = useTheme();
-  const figure = unit ? `${value} ${unit}` : value;
-  const shown = lines.filter((line): line is string => !!line);
-  return (
-    <View style={styles.answer} accessible accessibilityLabel={[figure, range, ...shown].filter(Boolean).join('. ')}>
-      <AppText variant="titleLarge" emphasized tabular>
-        {keepUnits(value)}
-        {unit ? <AppText variant="bodyLarge" color={colors.onSurfaceVariant}>{` ${unit}`}</AppText> : null}
-      </AppText>
-      {range ? <AppText variant="bodyLarge">{keepUnits(range)}</AppText> : null}
-      {shown.map((line) => (
-        <AppText key={line} variant="bodyMedium" color={colors.onSurfaceVariant}>
-          {keepUnits(line)}
-        </AppText>
-      ))}
-    </View>
-  );
-}
-
-function StatRow({ children }: { children: ReactNode }) {
-  return <View style={styles.statRow}>{children}</View>;
-}
-
-function Stat({ value, label }: { value: string; label: string }) {
-  const { colors } = useTheme();
-  return (
-    <View style={styles.stat} accessible accessibilityLabel={`${label}, ${value}`}>
-      <AppText variant="titleMedium" emphasized numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8} tabular>
-        {keepUnits(value)}
-      </AppText>
-      <AppText variant="bodySmall" color={colors.onSurfaceVariant} numberOfLines={2}>
-        {label}
-      </AppText>
-    </View>
-  );
-}
-
-/** The small label over one part of a card. */
-function SubLabel({ children }: { children: string }) {
-  const { colors } = useTheme();
-  return (
-    <AppText variant="labelLarge" color={colors.onSurfaceVariant}>
-      {children}
-    </AppText>
-  );
-}
-
-/**
- * The label over a group that follows a card inside a section, a step under the section's own
- * header, with the group's answer in words under it when it has one.
- */
-function ListHeader({ title, answer }: { title: string; answer?: string | null }) {
-  const { colors } = useTheme();
-  return (
-    <View style={styles.listHeader}>
-      <AppText variant="titleSmall" emphasized>
-        {title}
-      </AppText>
-      {answer ? (
-        <AppText variant="bodyMedium" color={colors.onSurfaceVariant} textBreakStrategy="balanced">
-          {keepUnits(answer)}
-        </AppText>
-      ) : null}
-    </View>
-  );
-}
-
-/** A finding on a card with its own avatar: the round mark, then whatever says it. */
-function Finding({ icon, tone, leading, children }: { icon?: IconName; tone?: AvatarTone; leading?: ReactNode; children: ReactNode }) {
-  return (
-    <View style={styles.finding}>
-      {leading ?? <Avatar icon={icon} tone={tone} />}
-      <View style={styles.findingBody}>{children}</View>
-    </View>
-  );
-}
-
-/**
- * One line of a proportion list: a name, its figure, and a bar to compare it with its neighbours.
- * The bar is scaled to the largest row; the figure beside it is the real number. With `upTo` the
- * figure is a range: the bar stops at its lower end and a thin line runs on to its upper end.
- */
-function BarRow({
-  label,
-  value,
-  share,
-  upTo,
-  color,
-  dot,
-  spoken,
-}: {
-  label: string;
-  value: string;
-  share: number;
-  upTo?: number;
-  color?: string;
-  /** A coloured dot before the name, when the bar's colour is the row's identity. */
-  dot?: string;
-  spoken: string;
-}) {
-  const { colors } = useTheme();
-  return (
-    <View style={styles.barRow} accessible accessibilityLabel={spoken}>
-      <View style={styles.barRowHead}>
-        {dot ? <View style={[styles.dot, { backgroundColor: dot }]} /> : null}
-        <AppText variant="titleSmall" numberOfLines={2} style={styles.fill}>
-          {label}
-        </AppText>
-        <AppText variant="labelLarge" color={colors.onSurfaceVariant} numberOfLines={1} tabular>
-          {keepUnits(value)}
-        </AppText>
-      </View>
-      <ProportionBar value={share} upTo={upTo} color={color} />
-    </View>
-  );
-}
-
 /**
  * One row of a segmented group, with `GroupRow`'s measures: a round avatar, a `titleMedium`
  * headline, quiet lines under it and a figure at the right. It differs from `GroupRow` in three
@@ -367,7 +307,8 @@ export function ListRow({
   tone,
   leading,
   headline,
-  lines = [],
+  lines: rowLines = [],
+  below,
   figure,
   onPress,
   corners,
@@ -380,6 +321,8 @@ export function ListRow({
   leading?: ReactNode;
   headline: string;
   lines?: (string | null)[];
+  /** Drawn under the lines, such as a row of small figures. */
+  below?: ReactNode;
   /** The row's number, right aligned, with what it is under it. */
   figure?: { value: string; label?: string };
   onPress?: () => void;
@@ -388,12 +331,12 @@ export function ListRow({
   spoken: string;
 }) {
   const { colors } = useTheme();
-  const shown = lines.filter((line): line is string => !!line);
-  const layout = [styles.row, { minHeight: shown.length ? 72 : 56 }];
+  const shown = rowLines.filter((line): line is string => !!line);
+  const layout = [styles.row, { minHeight: shown.length || below ? 72 : 56 }];
   const content = (
     <>
       {leading ?? (icon ? <Avatar icon={icon} tone={tone} /> : null)}
-      <View style={styles.fill}>
+      <View style={[styles.fill, styles.rowBody]}>
         <AppText variant="titleMedium" numberOfLines={2}>
           {headline}
         </AppText>
@@ -402,6 +345,7 @@ export function ListRow({
             {keepUnits(line)}
           </AppText>
         ))}
+        {below}
       </View>
       {figure ? (
         <View style={styles.rowFigure}>
@@ -430,24 +374,6 @@ export function ListRow({
         {content}
       </View>
     </GroupItem>
-  );
-}
-
-/** One of a pair of small facts: an avatar in its subject's colour, the figure, and what it is. */
-function FactTile({ icon, tone, value, label }: { icon: IconName; tone: AvatarTone; value: string; label: string }) {
-  const { colors } = useTheme();
-  return (
-    <View style={[styles.fact, { backgroundColor: colors.surfaceContainerHigh }]} accessible accessibilityLabel={`${label}, ${value}`}>
-      <Avatar icon={icon} tone={tone} />
-      <View style={styles.fill}>
-        <AppText variant="titleMedium" emphasized numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8} tabular>
-          {keepUnits(value)}
-        </AppText>
-        <AppText variant="bodyMedium" color={colors.onSurfaceVariant} numberOfLines={2}>
-          {label}
-        </AppText>
-      </View>
-    </View>
   );
 }
 
@@ -480,9 +406,43 @@ function FocalButton({ label, icon, onPress, style }: { label: string; icon: Ico
 }
 
 /**
+ * A change on the focal tile: the kit's delta chip in the tile's own colours. On `primaryContainer`
+ * a chip filled with that same container would vanish, so it is a tint of the tile's content colour,
+ * like the tile's buttons, whichever way the change goes.
+ */
+function FocalChip({ delta }: { delta: DeltaView }) {
+  const { colors } = useTheme();
+  const on = colors.onPrimaryContainer;
+  return (
+    <View style={[styles.focalChip, { backgroundColor: withAlpha(on, Alpha.track) }]}>
+      <Icon name={DELTA_ICON[delta.direction]} size={16} color={on} />
+      <AppText variant="labelLarge" emphasized tabular color={on} numberOfLines={1} maxFontSizeMultiplier={1.5}>
+        {keepUnits(delta.amount)}
+      </AppText>
+    </View>
+  );
+}
+
+/** A figure on the focal tile: the number, what it is in a quieter voice beside it, and its change. */
+function FocalFigure({ figure, hero }: { figure: HeadlineFigure; hero?: boolean }) {
+  const { colors } = useTheme();
+  const on = colors.onPrimaryContainer;
+  return (
+    <View style={styles.figureRow}>
+      <AppText variant={hero ? 'headlineLarge' : 'titleLarge'} emphasized tabular color={on}>
+        {keepUnits(figure.value)}
+        <AppText variant="bodyLarge" color={on}>{` ${figure.unit}`}</AppText>
+      </AppText>
+      {figure.delta ? <FocalChip delta={figure.delta} /> : null}
+    </View>
+  );
+}
+
+/**
  * The one focal tile, and the screen's hero moment: the most important fact of the period as a
- * sentence, and how much data it stands on. With nothing to say yet it asks for the first log, and
- * logging food is the one strong fill on the screen.
+ * figure, the average intake under a weight change, and what it all stands on as a row of counts.
+ * Its sentence is its spoken label. With nothing to say yet it asks for the first log, and logging
+ * food is the one strong fill on the screen.
  */
 export function HeadlineTile({ insights, onAction }: { insights: Insights; onAction: InsightActionHandler }) {
   const { colors } = useTheme();
@@ -514,14 +474,19 @@ export function HeadlineTile({ insights, onAction }: { insights: Insights; onAct
     );
   }
 
-  // What the sentence is built on, so a headline from four days does not read like one from thirty.
-  // Meals are counted in full days, because those are the days the average is over.
-  const basis: { count: number; label: string }[] = [];
+  const view = headlineView(insights);
+  // What the figures are built on, so a headline from four days does not read like one from thirty.
+  // Meals are counted in full days, because those are the days the average is over. The workouts
+  // are said but not drawn: no figure here stands on them, and the exercise tile right under this
+  // one draws the same count.
+  const basis: { icon: IconName; count: number; label: string }[] = [];
   const fullDays = insights.calories.ready ? insights.calories.completeDays : 0;
-  if (fullDays > 0) basis.push({ count: fullDays, label: fullDays === 1 ? 'full day of meals' : 'full days of meals' });
-  if (insights.weight.ready) basis.push({ count: insights.weight.weighIns, label: insights.weight.weighIns === 1 ? 'weigh-in' : 'weigh-ins' });
-  if (insights.exercise.ready) basis.push({ count: insights.exercise.workouts, label: insights.exercise.workouts === 1 ? 'workout' : 'workouts' });
-  const basisSpoken = basis.length ? ` From ${basis.map((b) => `${b.count} ${b.label}`).join(', ')}.` : '';
+  if (fullDays > 0) basis.push({ icon: 'silverware-fork-knife', count: fullDays, label: fullDays === 1 ? 'full day' : 'full days' });
+  if (insights.weight.ready) basis.push({ icon: 'scale-bathroom', count: insights.weight.weighIns, label: insights.weight.weighIns === 1 ? 'weigh-in' : 'weigh-ins' });
+  const said = insights.exercise.ready
+    ? [...basis, { count: insights.exercise.workouts, label: insights.exercise.workouts === 1 ? 'workout' : 'workouts' }]
+    : basis;
+  const basisSpoken = said.length ? ` From ${said.map((b) => `${b.count} ${b.label}`).join(', ')}.` : '';
 
   return (
     <View style={[styles.focal, { backgroundColor: colors.primaryContainer }]} accessible accessibilityLabel={`${period}. ${headline.text}${basisSpoken}`}>
@@ -531,17 +496,33 @@ export function HeadlineTile({ insights, onAction }: { insights: Insights; onAct
           {period}
         </AppText>
       </View>
-      <AppText variant="headlineSmall" emphasized color={on}>
-        {keepUnits(headline.text)}
-      </AppText>
+      <View style={styles.focalFigures}>
+        {view.figure ? <FocalFigure figure={view.figure} hero /> : null}
+        {view.second ? <FocalFigure figure={view.second} /> : null}
+        {view.meter ? <UnlockMeter have={view.meter.have} need={view.meter.need} label={view.meter.label} /> : null}
+        {view.line ? (
+          <AppText variant="bodyLarge" color={on}>
+            {keepUnits(view.line)}
+          </AppText>
+        ) : null}
+        {/* Nothing to draw: the sentence itself. */}
+        {!view.figure && !view.meter ? (
+          <AppText variant="headlineSmall" emphasized color={on}>
+            {keepUnits(headline.text)}
+          </AppText>
+        ) : null}
+      </View>
       {basis.length ? (
-        // The same three-figure line as under Today's ring: the number, and what it counts under it.
+        // The same counts as a stat row, in the tile's own colour: an icon, the number, and what it counts.
         <View style={styles.basis}>
           {basis.map((b) => (
             <View key={b.label} style={styles.basisItem}>
-              <AppText variant="titleMedium" emphasized tabular color={on} numberOfLines={1}>
-                {b.count}
-              </AppText>
+              <View style={styles.basisHead}>
+                <Icon name={b.icon} size={18} color={on} />
+                <AppText variant="titleMedium" emphasized tabular color={on} numberOfLines={1}>
+                  {b.count}
+                </AppText>
+              </View>
               <AppText variant="bodySmall" color={on} numberOfLines={2}>
                 {b.label}
               </AppText>
@@ -688,10 +669,10 @@ export function GlanceGrid({
             </View>
             <View>
               <AppText variant="titleMedium" emphasized color={fg} numberOfLines={2}>
-                {keepUnits(t.title)}
+                {noOrphan(keepUnits(t.title))}
               </AppText>
               <AppText variant="bodyMedium" color={quiet} numberOfLines={3}>
-                {keepUnits(t.detail)}
+                {noOrphan(keepUnits(t.detail))}
               </AppText>
             </View>
           </Tappable>
@@ -709,8 +690,84 @@ const LINE_NOTE = 'The line is the steady direction through your weigh-ins, and 
 const TENTATIVE_LINE_NOTE = 'The line is the closest straight line through your weigh-ins, which still swing too much around it to call a direction.';
 
 /**
- * Weight: the chart card, ending with how far the target is, and under it, when the weight has
- * moved far enough from the one the targets were set at, a tile that offers new ones.
+ * Where the target stands: a small ring with how far along the owner is (the sunny shape once it is
+ * reached), and the date the rate gives as the line beside it. With no target, the step to set one.
+ */
+function TargetRow({ w, onAction }: { w: WeightInfo; onAction: InsightActionHandler }) {
+  const goal = w.goal;
+  const text = w.projection.text;
+  if (!goal) {
+    return (
+      <View style={styles.finding}>
+        <Avatar icon="target" tone="ring" />
+        <View style={styles.findingBody}>
+          <Line strong>{text}</Line>
+          <ActionButton action="set-goal" onAction={onAction} />
+        </View>
+      </View>
+    );
+  }
+  const progress = goal.reached ? 1 : goal.progress;
+  return (
+    <View style={[styles.finding, styles.centred]}>
+      {progress !== null ? (
+        <SmallRing progress={progress} accessibilityLabel={goal.reached ? text : goalProgressText(goal)} />
+      ) : (
+        <Avatar icon="flag-checkered" tone="primary" />
+      )}
+      <View style={styles.findingBody}>
+        <Line strong>{text}</Line>
+      </View>
+    </View>
+  );
+}
+
+/** New targets for the current weight: the calories against now, the three macros, and why. */
+function RecalcCard({
+  recalc,
+  onRecalculate,
+  onKeepTargets,
+}: {
+  recalc: TargetsSuggestion;
+  onRecalculate: (toKg: number) => void;
+  onKeepTargets: (toKg: number) => void;
+}) {
+  const { colors } = useTheme();
+  const t = recalc.targets;
+  const macros: StatCell[] = [
+    { icon: 'egg-outline', figure: `${Math.round(t.protein)} g`, label: 'protein', tone: 'protein' },
+    { icon: 'bread-slice-outline', figure: `${Math.round(t.carbs)} g`, label: 'carbs', tone: 'carbs' },
+    { icon: 'water-outline', figure: `${Math.round(t.fat)} g`, label: 'fat', tone: 'fat' },
+  ];
+  return (
+    <View style={[styles.suggestion, { backgroundColor: colors.surfaceContainerHigh }]}>
+      <View style={styles.cardHead}>
+        <Avatar icon="calculator-variant-outline" tone="primary" />
+        <AppText variant="titleMedium" emphasized style={styles.fill}>
+          {`New targets for ${formatKg(recalc.toKg)}`}
+        </AppText>
+      </View>
+      <GlanceFigure
+        value={formatKcal(t.calories)}
+        unit="kcal a day"
+        delta={toChip(targetsDelta(recalc))}
+        accessibilityLabel={`${recalc.text} ${recalcSummary(recalc)}`}
+      />
+      <StatRow cells={macros} />
+      <Line>{recalcLine(recalc)}</Line>
+      {/* A suggestion can be declined: it then stays away until the weight has moved as far again. */}
+      <View style={styles.actions}>
+        <Button variant="tonal" title="Use new targets" icon="check" onPress={() => onRecalculate(recalc.toKg)} hitSlop={4} />
+        <Button variant="text" title="Keep my targets" onPress={() => onKeepTargets(recalc.toKg)} hitSlop={4} />
+      </View>
+    </View>
+  );
+}
+
+/**
+ * Weight: the latest weigh-in with the rate as a chip, the chart (the screen's one memorable
+ * picture), and the target as a small ring. Under it, when the weight has moved far enough from the
+ * one the targets were set at, a card that offers new ones.
  */
 function WeightGroup({
   w,
@@ -728,11 +785,14 @@ function WeightGroup({
   const { colors } = useTheme();
   const rate = w.rate;
   const goal = w.goal;
-  const recalc = w.recalc;
   const goalKg = w.chart.goalKg;
-  const latestWhen = w.latest.date === period.to ? 'today' : formatShortDate(w.latest.date);
+  const today = w.latest.date === period.to;
   // The chart opens on the first day anything was logged; the line is the one the card's figures come from.
   const marks = weightChartMarks(w, period);
+  const delta = weightRateDelta(rate);
+  const line = weightLine(w, period.to);
+  // A week sends the owner to the month as the card's last step; anything else to log comes first.
+  const pendingFirst = !rate.ready && rate.action !== 'longer-period';
 
   const legend: LegendEntry[] = [{ mark: 'dot', color: withAlpha(colors.primary, DOT_ALPHA), label: 'Weigh-in' }];
   if (marks.line) {
@@ -744,37 +804,27 @@ function WeightGroup({
   }
   if (goalKg !== null && !w.chart.goalOffChart) legend.push({ mark: 'dash', color: colors.outline, label: `Target ${formatKg(goalKg)}` });
 
-  const chartNotes: string[] = [];
-  if (marks.line) chartNotes.push(marks.tentative ? TENTATIVE_LINE_NOTE : LINE_NOTE);
-  if (goalKg !== null && w.chart.goalOffChart) chartNotes.push(`Your ${formatKg(goalKg)} target is ${w.chart.goalOffChart} this chart.`);
-
-  const progress = goal && goal.progress !== null && goal.startKg !== null && !goal.reached ? { share: goal.progress, startKg: goal.startKg } : null;
-  const progressText = goal
-    ? progress
-      ? `${percentText(progress.share)} of the way from ${formatKg(progress.startKg)} to ${formatKg(goal.kg)}, with ${formatKg(goal.toGoKg)} to go.`
-      : `${formatKg(goal.toGoKg)} to go to your ${formatKg(goal.kg)} target.`
-    : '';
+  // The figure already says when the latest weigh-in was.
+  const foot = lines(
+    rate.ready ? `${rate.rateText}. ${rate.changeText}.` : rate.reason,
+    rate.ready ? `Smoothed: ${formatKg(rate.nowKg)}, your weight on the day of your latest weigh-in with the day-to-day swings taken out.` : null,
+    w.weekAverages?.text,
+    marks.line ? (marks.tentative ? TENTATIVE_LINE_NOTE : LINE_NOTE) : null,
+    goalKg !== null && w.chart.goalOffChart ? `Your ${formatKg(goalKg)} target is ${w.chart.goalOffChart} this chart.` : null,
+    goal && !goal.reached ? goalProgressText(goal) : null,
+  );
 
   return (
     <View style={styles.group}>
       <ChartCard>
-        {rate.ready ? (
-          <>
-            {/* `rateText` and `changeText` state a direction only when the rate is clear; no figure of the rate is printed here. */}
-            <Answer title={rate.rateText} detail={`${rate.changeText}.`} />
-            <StatRow>
-              <Stat value={formatKg(w.latest.kg)} label={`Latest, ${latestWhen}`} />
-              <Stat value={formatKg(rate.nowKg)} label="Smoothed" />
-            </StatRow>
-          </>
-        ) : (
-          <>
-            <Figure value={formatKg(w.latest.kg)} lines={[latestWeighInText(w, period.to)]} />
-            {w.weekAverages ? <AppText variant="bodyMedium">{keepUnits(w.weekAverages.text)}</AppText> : null}
-            <Pending card={rate} onAction={onAction} />
-          </>
-        )}
-
+        <GlanceFigure
+          value={roundKg(w.latest.kg).toFixed(1)}
+          unit={today ? 'kg today' : `kg on ${formatShortDate(w.latest.date)}`}
+          delta={toChip(delta)}
+          accessibilityLabel={`Latest weigh-in ${formatKg(w.latest.kg)}, ${today ? 'today' : formatShortDate(w.latest.date)}.${delta ? ` ${delta.spoken}` : ''}`}
+        />
+        {line ? <Line>{line}</Line> : null}
+        {pendingFirst && !rate.ready ? <Pending card={rate} onAction={onAction} /> : null}
         <View style={styles.block}>
           <LineChart
             points={marks.points}
@@ -789,59 +839,19 @@ function WeightGroup({
           />
           <Legend items={legend} />
         </View>
-        {chartNotes.length ? <Note>{chartNotes.join(' ')}</Note> : null}
-
-        {goal ? (
-          goal.reached ? (
-            // One of the earned moments that get an expressive shape.
-            <Finding
-              leading={
-                <ShapeAvatar shape="sunny" size={AVATAR_SIZE} color={colors.primary}>
-                  <Icon name="check" size={24} color={colors.onPrimary} />
-                </ShapeAvatar>
-              }>
-              <AppText variant="bodyLarge">{keepUnits(w.projection.text)}</AppText>
-            </Finding>
-          ) : (
-            <Finding icon="flag-checkered" tone="primary">
-              <AppText variant="bodyLarge">{keepUnits(w.projection.text)}</AppText>
-              <View style={styles.block} accessible accessibilityLabel={progressText}>
-                {progress ? <ProportionBar value={progress.share} /> : null}
-                <AppText variant="bodyMedium" color={colors.onSurfaceVariant}>
-                  {keepUnits(progressText)}
-                </AppText>
-              </View>
-            </Finding>
-          )
-        ) : (
-          <Finding icon="target" tone="ring">
-            <AppText variant="bodyLarge">{keepUnits(w.projection.text)}</AppText>
-            <ActionButton action="set-goal" onAction={onAction} />
-          </Finding>
-        )}
+        <TargetRow w={w} onAction={onAction} />
+        {!pendingFirst && !rate.ready ? <Pending card={rate} onAction={onAction} /> : null}
+        <HowItsWorkedOut paragraphs={foot} />
       </ChartCard>
 
-      {recalc ? (
-        <View style={[styles.suggestion, { backgroundColor: colors.surfaceContainerHigh }]}>
-          <Finding icon="calculator-variant-outline" tone="primary">
-            <AppText variant="bodyLarge">{keepUnits(recalc.text)}</AppText>
-            <AppText variant="bodyMedium" color={colors.onSurfaceVariant}>
-              {keepUnits(recalcSummary(recalc))}
-            </AppText>
-          </Finding>
-          {/* A suggestion can be declined: it then stays away until the weight has moved as far again. */}
-          <View style={styles.actions}>
-            <Button variant="tonal" title="Use new targets" icon="check" onPress={() => onRecalculate(recalc.toKg)} hitSlop={4} />
-            <Button variant="text" title="Keep my targets" onPress={() => onKeepTargets(recalc.toKg)} hitSlop={4} />
-          </View>
-        </View>
-      ) : null}
+      {w.recalc ? <RecalcCard recalc={w.recalc} onRecalculate={onRecalculate} onKeepTargets={onKeepTargets} /> : null}
     </View>
   );
 }
 
 // ---------------------------------------------------------------- 3. calories
 
+/** The average and its chip, the days as bars against the goal, and three counts. The words are in the foot. */
 function CaloriesCard({ c, period, onAction }: { c: CaloriesInfo; period: Period; onAction: InsightActionHandler }) {
   const { colors } = useTheme();
   const average = c.average;
@@ -854,25 +864,41 @@ function CaloriesCard({ c, period, onAction }: { c: CaloriesInfo; period: Period
     legend.push({ mark: 'box', color: withAlpha(colors.primary, FADED_ALPHA), label: 'Not in the average' });
   }
 
-  // The small print: what was left out first, then what the words on this card mean.
-  const notes: string[] = [];
-  if (c.note) notes.push(c.note);
-  notes.push(`A full day has at least ${formatKcal(period.completeDayKcal)} kcal logged.`);
-  if (period.firstLoggedDate && period.firstLoggedDate > period.from) {
-    notes.push(`Days are counted from your first log on ${formatShortDate(period.firstLoggedDate)}.`);
+  const averageWords = average.ready ? `Across ${plural(average.days, 'full day')}. ${averageVsGoalText(average.vsGoal, c.goal)}.` : average.reason;
+  const foot = lines(
+    averageWords,
+    c.budgetText,
+    c.note,
+    `A full day has at least ${formatKcal(period.completeDayKcal)} kcal logged.`,
+    period.firstLoggedDate && period.firstLoggedDate > period.from ? `Days are counted from your first log on ${formatShortDate(period.firstLoggedDate)}.` : null,
+    c.bars.some((b) => b.status === 'within' && b.calories !== null && b.calories > c.goal)
+      ? 'A day can pass the goal line and stay within budget: a workout raises that day’s budget.'
+      : null,
+  );
+  // One meaning per icon across the tab: a month calendar counts days, the event check is a streak,
+  // the tick is within budget, and bars over a line are days over it, like this card's red caps.
+  const stats: StatCell[] = [
+    { icon: 'calendar-month-outline', figure: `${c.loggedDays} of ${c.countedDays}`, label: 'days logged', spoken: `${c.loggedDays} of ${plural(c.countedDays, 'day')} logged` },
+  ];
+  if (c.completeDays > 0) {
+    stats.push({
+      icon: 'check-circle-outline',
+      figure: `${c.withinBudgetDays} of ${c.completeDays}`,
+      label: 'within budget',
+      spoken: `${c.withinBudgetDays} of ${plural(c.completeDays, 'full day')} within budget`,
+    });
   }
-  if (c.bars.some((b) => b.status === 'within' && b.calories !== null && b.calories > c.goal)) {
-    notes.push('A day can pass the goal line and stay within budget: a workout raises that day’s budget.');
-  }
+  // Not an arrow: an arrow is a change everywhere else on the tab (the delta chips).
+  stats.push({ icon: 'chart-bar-stacked', figure: String(c.overBudgetDays), label: 'over budget', spoken: `${plural(c.overBudgetDays, 'day')} over budget` });
 
   return (
     <ChartCard>
       {average.ready ? (
-        <Figure
+        <GlanceFigure
           value={formatKcal(average.kcal)}
-          unit="kcal a day on average"
-          // The average carries the days it is over, then how it compares; the budget line joins it to the bars below.
-          lines={[`Across ${plural(average.days, 'full day')}. ${averageVsGoalText(average.vsGoal, c.goal)}.`, c.budgetText]}
+          unit="kcal a day"
+          delta={toChip(calorieDelta(average.vsGoal, c.goal))}
+          accessibilityLabel={`${formatKcal(average.kcal)} kcal a day on average. ${averageWords}`}
         />
       ) : (
         <Pending card={average} onAction={onAction} />
@@ -888,20 +914,36 @@ function CaloriesCard({ c, period, onAction }: { c: CaloriesInfo; period: Period
         />
         <Legend items={legend} />
       </View>
-      <StatRow>
-        <Stat value={`${c.loggedDays} of ${c.countedDays}`} label="Days logged" />
-        {c.completeDays > 0 ? <Stat value={`${c.withinBudgetDays} of ${c.completeDays}`} label="Full days within budget" /> : null}
-        <Stat value={String(c.overBudgetDays)} label={c.overBudgetDays === 1 ? 'Day over budget' : 'Days over budget'} />
-      </StatRow>
-      <Note>{notes.join(' ')}</Note>
+      <StatRow cells={stats} />
+      <HowItsWorkedOut paragraphs={foot} />
     </ChartCard>
   );
 }
 
 // ---------------------------------------------------------------- 4. week by week
 
-/** The period as whole weeks, newest first: one row each, so one week can be read against the next. */
+/** A small figure on a week's row: an icon in its subject's colour and the figure. */
+function WeekFact({ icon, color, text }: { icon: IconName; color: string; text: string }) {
+  const { colors } = useTheme();
+  return (
+    <View style={styles.weekFact}>
+      <Icon name={icon} size={16} color={color} />
+      <AppText variant="bodyMedium" tabular color={colors.onSurfaceVariant} numberOfLines={1}>
+        {keepUnits(text)}
+      </AppText>
+    </View>
+  );
+}
+
+/**
+ * The period as whole weeks, newest first: one row each, so one week can be read against the next.
+ * Each row has its dates, the average intake at the right with how many full days it stands on, and
+ * under the dates the week's weight and workouts as small figures. The figures sit in tabular
+ * columns, so the eye compares one week with the next; no arrow is drawn between them, because a
+ * difference between two weeks is not a direction (PRODUCT.md: an arrow only for a clear rate).
+ */
 function WeekRows({ weeks, today }: { weeks: WeekBlock[]; today: string }) {
+  const { colors } = useTheme();
   return (
     <Group>
       {weeks.map((block) => {
@@ -909,10 +951,19 @@ function WeekRows({ weeks, today }: { weeks: WeekBlock[]; today: string }) {
         return (
           <ListRow
             key={block.from}
-            icon="calendar-week"
-            tone="secondary"
             headline={text.title}
-            lines={[text.weight, text.exercise, text.note]}
+            lines={[text.note]}
+            below={
+              <View style={styles.weekFacts}>
+                <WeekFact
+                  icon="scale-bathroom"
+                  color={colors.primary}
+                  text={text.weightFigure ? (text.weightOnce ? `${text.weightFigure} once` : text.weightFigure) : 'No weigh-ins'}
+                />
+                {/* The runner says what is counted; the words are in the row's spoken label. */}
+                <WeekFact icon="run" color={colors.tertiary} text={String(block.workouts)} />
+              </View>
+            }
             figure={{ value: text.kcal, label: text.kcalBasis }}
             spoken={text.spoken}
           />
@@ -929,50 +980,76 @@ const CONFIDENCE_LABEL: Record<MaintenanceInfo['confidence'], string> = {
   fair: 'Fair estimate',
   good: 'Good estimate',
 };
+const CONFIDENCE_BARS: Record<MaintenanceInfo['confidence'], number> = { rough: 1, fair: 2, good: 3 };
 
+/**
+ * How sure the estimate is, as a quiet chip: three rising bars, as many filled as it is sure
+ * (rough one, fair two, good three), and the word. The bars are movement's tertiary, like the band.
+ */
+function ConfidenceChip({ level }: { level: MaintenanceInfo['confidence'] }) {
+  const { colors } = useTheme();
+  const filled = CONFIDENCE_BARS[level];
+  return (
+    <View style={[styles.statusChip, { backgroundColor: colors.surfaceContainerHighest }]}>
+      <View style={styles.signal}>
+        {[0, 1, 2].map((i) => (
+          <View key={i} style={[styles.signalBar, { height: 6 + i * 3, backgroundColor: i < filled ? colors.tertiary : withAlpha(colors.onSurface, Alpha.track) }]} />
+        ))}
+      </View>
+      <AppText variant="labelLarge" color={colors.onSurfaceVariant} numberOfLines={1} maxFontSizeMultiplier={1.5}>
+        {CONFIDENCE_LABEL[level]}
+      </AppText>
+    </View>
+  );
+}
+
+/**
+ * What you actually burn: about how much, how sure, and one range bar with the burn band (the
+ * tertiary, calories burned being movement) against what you eat (a dot in the primary) and the goal
+ * and the calculator's figure (ticks, as references). Its sentences are in the foot.
+ */
 function MaintenanceCard({ m }: { m: MaintenanceInfo }) {
   const { colors } = useTheme();
-  // The estimate is the data, and it is a range. What it is compared with is neutral, like the dashed goal lines.
-  const reference = colors.outline;
-  const rows = [
-    { label: 'You eat', kcal: m.averageIntake },
-    { label: 'Your goal', kcal: m.goal.kcal },
+  const scale = burnScale(m);
+  const band = m.low === m.high ? formatKcal(m.low) : `${formatKcal(m.low)}–${formatKcal(m.high)}`;
+  const marks: RangeMark[] = [
+    { value: m.averageIntake, label: 'You eat', figure: formatKcal(m.averageIntake), kind: 'dot', tone: 'primary' },
+    { value: m.goal.kcal, label: 'Goal', figure: formatKcal(m.goal.kcal), kind: 'tick' },
   ];
-  if (m.formulaKcal !== null) rows.push({ label: 'Calculator estimate', kcal: m.formulaKcal });
-  const [high, low, ...shares] = relativeToLargest([m.high, m.low, ...rows.map((r) => r.kcal)]);
+  if (m.formulaKcal !== null) marks.push({ value: m.formulaKcal, label: 'Calculator', figure: formatKcal(m.formulaKcal), kind: 'tick' });
+  const spokenBar = lines(
+    `You burn between ${formatKcal(m.low)} and ${formatKcal(m.high)} kcal a day.`,
+    `You eat ${formatKcal(m.averageIntake)}.`,
+    m.goal.text,
+    m.formulaText,
+  ).join(' ');
 
   return (
     <ChartCard>
-      <Figure value={`About ${formatKcal(m.kcal)}`} unit="kcal a day" range={m.rangeText} lines={[maintenanceBasisText(m)]} />
-      <View style={styles.rows}>
-        <BarRow
-          label="You burn"
-          value={`${formatKcal(m.low)} to ${formatKcal(m.high)} kcal`}
-          share={low}
-          upTo={high}
-          color={colors.primary}
-          spoken={`You burn, between ${formatKcal(m.low)} and ${formatKcal(m.high)} calories a day`}
-        />
-        {rows.map((r, i) => (
-          <BarRow
-            key={r.label}
-            label={r.label}
-            value={`${formatKcal(r.kcal)} kcal`}
-            share={shares[i]}
-            color={reference}
-            spoken={`${r.label}, ${formatKcal(r.kcal)} calories a day`}
-          />
-        ))}
-      </View>
-      <View style={styles.block}>
-        <AppText variant="bodyLarge">{keepUnits(m.goal.text)}</AppText>
-        {m.formulaText ? (
-          <AppText variant="bodyMedium" color={colors.onSurfaceVariant}>
-            {keepUnits(m.formulaText)}
+      <View style={styles.figureRow} accessible accessibilityLabel={`About ${formatKcal(m.kcal)} kcal a day. ${m.rangeText}. ${CONFIDENCE_LABEL[m.confidence]}.`}>
+        <AppText variant="headlineSmall" emphasized tabular>
+          <AppText variant="bodyLarge" color={colors.onSurfaceVariant}>
+            {'About '}
           </AppText>
-        ) : null}
+          {keepUnits(formatKcal(m.kcal))}
+          <AppText variant="bodyLarge" color={colors.onSurfaceVariant}>
+            {' kcal a day'}
+          </AppText>
+        </AppText>
+        <ConfidenceChip level={m.confidence} />
       </View>
-      <Note>{m.note}</Note>
+      <RangeBar
+        min={scale.min}
+        max={scale.max}
+        low={m.low}
+        high={m.high}
+        bandLabel={{ label: 'You burn', figure: band }}
+        marks={marks}
+        tone="tertiary"
+        accessibilityLabel={spokenBar}
+      />
+      <Line>{burnLine(m)}</Line>
+      <HowItsWorkedOut paragraphs={lines(`${m.rangeText}.`, maintenanceBasisText(m), m.goal.text, m.formulaText, m.note)} />
     </ChartCard>
   );
 }
@@ -987,112 +1064,158 @@ const MACROS: { key: Category; label: string }[] = [
 
 const macroValue = (a: MacroAverage): string => (a.goal > 0 ? `${Math.round(a.average)} of ${Math.round(a.goal)} g` : `${Math.round(a.average)} g`);
 
-function MacrosCard({ m }: { m: MacrosInfo }) {
+/**
+ * One line of a proportion list: a name, its figure, and a bar to compare it with its neighbours.
+ * The bar is scaled to its goal; the figure beside it is the real number. A coloured dot before the
+ * name when the bar's colour is the row's identity.
+ */
+function MacroBar({ label, value, share, color, spoken }: { label: string; value: string; share: number; color: string; spoken: string }) {
+  const { colors } = useTheme();
+  return (
+    <View style={styles.macroBar} accessible accessibilityLabel={spoken}>
+      <View style={styles.macroHead}>
+        <View style={[styles.dot, { backgroundColor: color }]} />
+        <AppText variant="titleSmall" numberOfLines={1} style={styles.fill}>
+          {label}
+        </AppText>
+        <AppText variant="labelLarge" color={colors.onSurfaceVariant} numberOfLines={1} tabular>
+          {keepUnits(value)}
+        </AppText>
+      </View>
+      <ProportionBar value={share} color={color} />
+    </View>
+  );
+}
+
+/**
+ * Macros: the days protein reached its goal as a figure and a row of dots, the three daily averages
+ * against their goals as bars, and where the calories come from as one split bar. What counts as a
+ * protein day, and what was left out, are in the foot.
+ */
+function MacrosCard({ m, days, period }: { m: MacrosInfo; days: readonly DaySummary[]; period: Period }) {
   const { colors, dark } = useTheme();
   const palette = categoryColors(colors.primary, dark);
   const split = m.split;
   const hasProteinGoal = m.protein.goal > 0;
+  const hitRule = `A day counts when you reach at least ${percentText(PROTEIN_HIT_SHARE)} of your protein goal.`;
+  const proteinSentence = `Protein goal met on ${m.proteinDays} of ${plural(m.days, 'full day')}.`;
+  // A dot a day reads for a week or a month; ninety are a texture, and the figure says it.
+  const dots = hasProteinGoal && period.chartDays <= 31 ? proteinDayMarks(days, period, m.protein.goal) : null;
 
   return (
     <ChartCard>
-      <Answer
-        title={hasProteinGoal ? `Protein goal met on ${m.proteinDays} of ${plural(m.days, 'full day')}` : `Daily averages over ${plural(m.days, 'full day')}`}
-        detail={hasProteinGoal ? `A day counts when you reach at least ${percentText(PROTEIN_HIT_SHARE)} of your protein goal.` : undefined}
-      />
-      <View style={styles.block}>
-        <SubLabel>Daily average against your goal</SubLabel>
-        <View style={styles.rows}>
-          {MACROS.map(({ key, label }) => {
-            const a = m[key];
-            return (
-              <BarRow
-                key={key}
-                label={label}
-                value={macroValue(a)}
-                share={a.ratio ?? 0}
-                color={palette[key].color}
-                dot={palette[key].color}
-                spoken={`${label}, ${Math.round(a.average)} grams a day${a.goal > 0 ? `, goal ${Math.round(a.goal)}` : ''}`}
-              />
-            );
-          })}
+      {hasProteinGoal ? (
+        <View style={styles.block}>
+          <GlanceFigure value={`${m.proteinDays} of ${m.days}`} unit="days on protein goal" accessibilityLabel={`${proteinSentence} ${hitRule}`} />
+          {dots ? (
+            <DayDots days={dots.marks} labels={dots.labels ?? undefined} tone="protein" accessibilityLabel={`${proteinSentence} Each dot is a day; filled is a day that reached it.`} />
+          ) : null}
         </View>
+      ) : null}
+      <View style={styles.rows}>
+        {MACROS.map(({ key, label }) => {
+          const a = m[key];
+          return (
+            <MacroBar
+              key={key}
+              label={label}
+              value={macroValue(a)}
+              share={a.ratio ?? 0}
+              color={palette[key].color}
+              spoken={`${label}, ${Math.round(a.average)} grams a day${a.goal > 0 ? `, goal ${Math.round(a.goal)}` : ''}`}
+            />
+          );
+        })}
       </View>
       {split ? (
         <View style={styles.block}>
-          <SubLabel>Where your calories come from</SubLabel>
-          <View
-            style={styles.block}
-            accessible
-            accessibilityLabel={`Calories: ${percentText(split.protein)} from protein, ${percentText(split.carbs)} from carbs, ${percentText(split.fat)} from fat`}>
-            <StackedBar segments={MACROS.map(({ key }) => ({ value: split[key], color: palette[key].color }))} />
-            <Legend items={MACROS.map(({ key, label }) => ({ mark: 'dot', color: palette[key].color, label: `${label} ${percentText(split[key])}` }))} />
-          </View>
+          <SubLabel>Share of calories</SubLabel>
+          <SplitBar
+            segments={MACROS.map(({ key, label }) => ({ label, value: split[key], tone: key }))}
+            accessibilityLabel={`Calories: ${percentText(split.protein)} from protein, ${percentText(split.carbs)} from carbs, ${percentText(split.fat)} from fat`}
+          />
         </View>
       ) : null}
-      {m.note ? <Note>{m.note}</Note> : null}
+      <HowItsWorkedOut paragraphs={lines(`Daily averages over ${plural(m.days, 'full day')}.`, hasProteinGoal ? hitRule : null, m.note)} />
     </ChartCard>
   );
 }
 
 // ---------------------------------------------------------------- 7. exercise
 
-/** Movement, in the tertiary throughout: the chart card, a pair of totals, then the top activities as a group. */
-function ExerciseGroup({ e, period }: { e: ExerciseInfo; period: Period }) {
-  // A weekly average needs a week of use; before that the line is left out and the answer stands alone.
+/**
+ * Movement, in the tertiary throughout: the time as the figure, the minutes of each day as bars,
+ * what it burned and how often as counts, and the top activities as bar rows.
+ */
+function ExerciseCard({ e, period }: { e: ExerciseInfo; period: Period }) {
   const weekly = e.perWeek
-    ? `${e.perWeek.workouts} ${e.perWeek.workouts === 1 ? 'workout' : 'workouts'} and ${formatMinutes(e.perWeek.minutes)} a week on average`
-    : undefined;
+    ? `${e.perWeek.workouts} ${e.perWeek.workouts === 1 ? 'workout' : 'workouts'} and ${formatMinutes(e.perWeek.minutes)} a week on average.`
+    : null;
+  const stats: StatCell[] = [
+    { icon: 'fire', figure: formatKcal(e.calories), label: 'kcal burned', tone: 'tertiary', spoken: `${formatKcal(e.calories)} kcal burned in workouts` },
+    { icon: 'calendar-month-outline', figure: String(e.activeDays), label: e.activeDays === 1 ? 'active day' : 'active days', tone: 'tertiary' },
+  ];
+  // A weekly average needs a week of use; before that it is left out.
+  if (e.perWeek) stats.push({ icon: 'run', figure: String(e.perWeek.workouts), label: 'workouts a week', tone: 'tertiary', spoken: weekly ?? undefined });
+  const shares = relativeToLargest(e.top.map((a) => a.minutes));
 
   return (
-    <View style={styles.group}>
-      <ChartCard>
-        <Answer title={`${plural(e.workouts, 'workout')} on ${plural(e.activeDays, 'day')}`} detail={weekly} />
-        <View style={styles.block}>
-          <SubLabel>Minutes each day</SubLabel>
-          <BarChart
-            bars={exerciseChartBars(chartRows(e.daily, period))}
-            axis={periodAxis(period.chartFrom, period.chartDays, period.to)}
-            height={64}
-            accessibilityLabel={describeExerciseChart(e, period.to)}
-          />
-        </View>
-      </ChartCard>
-      <View style={styles.grid}>
-        <FactTile icon="timer-outline" tone="tertiary" value={formatMinutes(e.minutes)} label="Total time" />
-        <FactTile icon="fire" tone="tertiary" value={`${formatKcal(e.calories)} kcal`} label="Burned in workouts" />
-      </View>
+    <ChartCard>
+      <GlanceFigure
+        value={formatMinutes(e.minutes)}
+        unit={`in ${plural(e.workouts, 'workout')}`}
+        accessibilityLabel={`${formatMinutes(e.minutes)} of exercise in ${plural(e.workouts, 'workout')} on ${plural(e.activeDays, 'day')}.`}
+      />
+      <BarChart
+        bars={exerciseChartBars(chartRows(e.daily, period))}
+        axis={periodAxis(period.chartFrom, period.chartDays, period.to)}
+        height={64}
+        accessibilityLabel={describeExerciseChart(e, period.to)}
+      />
+      <StatRow cells={stats} />
+      {/* The top activities need no label over them: an activity's avatar, its name and its time say what they are. */}
       {e.top.length ? (
-        <>
-          <ListHeader title="Top activities by time" />
-          <Group>
-            {e.top.map((a) => (
-              <ListRow
-                key={a.activity}
-                icon={a.icon as IconName}
-                tone="tertiary"
-                headline={a.label}
-                lines={[`${plural(a.workouts, 'workout')}, ${formatKcal(a.calories)} kcal`, `${percentText(a.share)} of your exercise time`]}
-                figure={{ value: formatMinutes(a.minutes) }}
-                spoken={`${a.label}, ${formatMinutes(a.minutes)} in ${plural(a.workouts, 'workout')}, ${percentText(a.share)} of your exercise time`}
-              />
-            ))}
-          </Group>
-        </>
+        <BarRows
+          tone="tertiary"
+          items={e.top.map((a, i) => ({
+            name: a.label,
+            figure: formatMinutes(a.minutes),
+            share: shares[i],
+            icon: a.icon as IconName,
+            spoken: `${a.label}, ${formatMinutes(a.minutes)} in ${plural(a.workouts, 'workout')}, ${formatKcal(a.calories)} kcal, ${percentText(a.share)} of your exercise time`,
+          }))}
+        />
       ) : null}
-    </View>
+      <HowItsWorkedOut
+        paragraphs={lines(
+          weekly,
+          ...e.top.map((a) => `${a.label}: ${plural(a.workouts, 'workout')}, ${formatKcal(a.calories)} kcal, ${percentText(a.share)} of your exercise time.`),
+        )}
+      />
+    </ChartCard>
   );
 }
 
 // ---------------------------------------------------------------- 8. consistency
 
-function ConsistencyGroup({ c, period, onOpenDay }: { c: ConsistencyInfo; period: Period; onOpenDay: (date: string) => void }) {
+/**
+ * Consistency: the two streaks as counts, the calendar, and a line only when there is something
+ * worth saying in words (a weekday that keeps going unlogged, today's step, or a record run). The
+ * days logged are the Calories card's count and the calendar's picture, so they are not counted
+ * again here; the counts sentence that adds up is in the foot and in the calendar's spoken label.
+ */
+function ConsistencyCard({ c, period, onOpenDay }: { c: ConsistencyInfo; period: Period; onOpenDay: (date: string) => void }) {
   const { colors } = useTheme();
   const streak = c.streak;
+  const longest = streak.current > 1 && streak.current === streak.best ? 'This is your longest run so far.' : null;
+  // Today's ring on the calendar already shows a logged today, so that needs no words of its own.
   const nudge =
     streak.current === 0
       ? 'Log a meal today to start a new streak.'
-      : `${streak.loggedToday ? 'Today is logged.' : 'Log a meal today to keep your streak going.'}${streak.current > 1 && streak.current === streak.best ? ' This is your longest run so far.' : ''}`;
+      : streak.loggedToday
+        ? longest
+        : lines('Log a meal today to keep your streak going.', longest).join(' ');
+  const line = c.skipped ? c.skipped.text : nudge;
   // One entry for each mark the calendar draws. A day with nothing logged has no mark, so it has no entry.
   const legend: LegendEntry[] = [
     { mark: 'cookie', color: colors.primary, label: 'Within budget' },
@@ -1101,127 +1224,150 @@ function ConsistencyGroup({ c, period, onOpenDay }: { c: ConsistencyInfo; period
   ];
   // A week or a month has rows tall enough to tap; ninety days keep their small cells and open nothing.
   const tappable = period.days <= 30;
-  // The counts as one sentence that adds up, from the data layer: its opening is the answer, the rest what it adds up from.
-  const answer = splitAnswer(c.text);
+  const stats: StatCell[] = [
+    { icon: 'calendar-check', figure: String(streak.current), label: 'day streak', tone: 'secondary', spoken: `Current streak, ${plural(streak.current, 'day')}` },
+    { icon: 'medal-outline', figure: String(streak.best), label: 'best streak', tone: 'secondary', spoken: `Best streak, ${plural(streak.best, 'day')}` },
+  ];
 
   return (
-    <View style={styles.group}>
-      <View style={styles.grid}>
-        <FactTile icon="calendar-check" tone="secondary" value={plural(streak.current, 'day')} label="Current streak" />
-        <FactTile icon="medal-outline" tone="secondary" value={plural(streak.best, 'day')} label="Best streak" />
+    <ChartCard>
+      <StatRow cells={stats} />
+      <View style={styles.block}>
+        <CalendarGrid
+          days={c.calendar}
+          leadingBlanks={c.leadingBlanks}
+          showNumbers={tappable}
+          onDayPress={tappable ? onOpenDay : undefined}
+          accessibilityLabel={describeCalendar(c)}
+        />
+        <Legend items={legend} />
       </View>
-      <ChartCard>
-        <Answer title={answer.lead} detail={answer.rest} />
-        <View style={styles.block}>
-          <CalendarGrid
-            days={c.calendar}
-            leadingBlanks={c.leadingBlanks}
-            showNumbers={tappable}
-            onDayPress={tappable ? onOpenDay : undefined}
-            accessibilityLabel={describeCalendar(c)}
-          />
-          <Legend items={legend} />
-        </View>
-        <View style={styles.block}>
-          {c.skipped ? <AppText variant="bodyLarge">{c.skipped.text}</AppText> : null}
-          <AppText variant="bodyMedium" color={colors.onSurfaceVariant}>
-            {nudge}
-          </AppText>
-          {tappable ? (
-            // For the eye only: to a screen reader the calendar is one image, and "Every day" is the way to a day.
-            <AppText variant="bodySmall" color={colors.onSurfaceVariant} importantForAccessibility="no" accessibilityElementsHidden>
-              Tap a day to open it.
-            </AppText>
-          ) : null}
-        </View>
-      </ChartCard>
-    </View>
+      {line ? <Line strong={!!c.skipped}>{line}</Line> : null}
+      <HowItsWorkedOut paragraphs={lines(c.text, c.skipped ? nudge : null, tappable ? 'Tap a day on the calendar to open it.' : null)} />
+    </ChartCard>
   );
 }
 
 // ---------------------------------------------------------------- 9. patterns
 
 /**
- * Three findings, each in the container that suits it: weekdays against weekends is a card with two
- * figures, the meals are a group with the same avatars as Today's meals, and the day of the week
- * is a card with its chart.
+ * Patterns, as three pictures in one card: weekdays against weekends as two dots on a range with
+ * the goal (how far apart they are is the finding), the meals as one split bar, and the day of the
+ * week as bars with the highest picked out only when it really stands out.
  */
-function PatternsGroup({ p, onAction }: { p: PatternsInfo; onAction: InsightActionHandler }) {
+function PatternsCard({ p, goal, onAction }: { p: PatternsInfo; goal: number | null; onAction: InsightActionHandler }) {
+  const { colors } = useTheme();
   const split = p.weekSplit;
   const highest = p.highestDay;
-  const biggestMeal = biggestMealText(p.meals);
+  const shades = shadesOf(colors.primary, p.meals.length);
+  const scale = kcalScale(split.ready ? [split.weekday.average, split.weekend.average, goal] : []);
+  const splitMarks: RangeMark[] = split.ready
+    ? [
+        { value: split.weekday.average, label: 'Weekdays', figure: formatKcal(split.weekday.average), kind: 'dot' },
+        { value: split.weekend.average, label: 'Weekends', figure: formatKcal(split.weekend.average), kind: 'dot' },
+        ...(goal !== null ? [{ value: goal, label: 'Goal', figure: formatKcal(goal), kind: 'tick' } as const] : []),
+      ]
+    : [];
+  const splitWords = split.ready
+    ? `${split.text} Weekdays ${formatKcal(split.weekday.average)} kcal over ${plural(split.weekday.days, 'full day')}, weekends ${formatKcal(split.weekend.average)} kcal over ${plural(split.weekend.days, 'full day')}.`
+    : split.reason;
 
-  return (
-    <View style={styles.group}>
-      <ChartCard>
-        <SubLabel>Weekdays and weekends</SubLabel>
-        {split.ready ? (
-          <>
-            <Answer title={split.text} />
-            <StatRow>
-              <Stat value={`${formatKcal(split.weekday.average)} kcal`} label={`Weekdays, ${plural(split.weekday.days, 'full day')}`} />
-              <Stat value={`${formatKcal(split.weekend.average)} kcal`} label={`Weekends, ${plural(split.weekend.days, 'full day')}`} />
-            </StatRow>
-          </>
-        ) : (
-          <Pending card={split} onAction={onAction} />
-        )}
-      </ChartCard>
+  // The day of the week waiting on the same step as weekdays and weekends: that block offers it once.
+  const dayQuiet = !split.ready && !highest.ready && !!split.action && split.action === highest.action;
 
-      <ListHeader title="Calories by meal" answer={biggestMeal} />
-      <Group>
-        {p.meals.map((m) => (
-          <ListRow
-            key={m.meal}
-            icon={MEAL_ICONS[m.meal]}
-            tone="secondary"
-            headline={m.label}
-            lines={[`${formatKcal(m.average)} kcal a day`]}
-            figure={{ value: percentText(m.share) }}
-            spoken={`${m.label}, ${percentText(m.share)} of your calories, ${formatKcal(m.average)} a day`}
-          />
-        ))}
-      </Group>
-
-      <ChartCard>
+  const splitBlock = (
+    <View key="split" style={styles.block}>
+      <SubLabel>Weekdays and weekends</SubLabel>
+      {split.ready ? (
+        <>
+          <RangeBar min={scale.min} max={scale.max} marks={splitMarks} accessibilityLabel={splitWords} />
+          <Line>{weekSplitLine(split)}</Line>
+        </>
+      ) : (
+        <Pending card={split} onAction={onAction} />
+      )}
+    </View>
+  );
+  const mealsBlock = (
+    <View key="meals" style={styles.block}>
+      <SubLabel>Calories by meal</SubLabel>
+      <SplitBar segments={p.meals.map((m, i) => ({ label: m.label, value: m.share, color: shades[i] }))} accessibilityLabel={mealsSpoken(p.meals)} />
+    </View>
+  );
+  // Waiting only for a longer period, with the step already offered above: nothing to draw, and its
+  // reason is in the foot, so the block is left out rather than kept as a heading over a sentence.
+  const dayBlock =
+    dayQuiet && !highest.ready && onlyNeedsMonth(highest) ? null : (
+      <View key="day" style={styles.block}>
         <SubLabel>Day of the week</SubLabel>
         {highest.ready ? (
           <>
-            <Answer title={highest.text} />
             {/* Drawn only with enough days behind it. A bar is picked out only when its day really stands out. */}
             <BarChart
               bars={weekdayChartBars(p.byWeekday, highest.standsOut ? highest.weekday : null)}
               axis={WEEKDAY_AXIS}
               height={72}
-              accessibilityLabel={describeWeekdayChart(p.byWeekday)}
+              accessibilityLabel={`${describeWeekdayChart(p.byWeekday)} ${highest.text}`}
             />
+            <Line>{highest.text}</Line>
           </>
         ) : (
-          <Pending card={highest} onAction={onAction} />
+          <Pending card={highest} onAction={onAction} quiet={dayQuiet} />
         )}
-      </ChartCard>
-    </View>
+      </View>
+    );
+
+  return (
+    <ChartCard>
+      {/* The card opens with a picture: while weekdays and weekends wait, the meals come first. */}
+      {split.ready ? [splitBlock, mealsBlock, dayBlock] : [mealsBlock, splitBlock, dayBlock]}
+      <HowItsWorkedOut paragraphs={lines(splitWords, mealsSpoken(p.meals), highest.ready ? null : highest.reason)} />
+    </ChartCard>
   );
 }
 
 // ---------------------------------------------------------------- 10. top foods
 
-function TopFoodRows({ foods }: { foods: TopFood[] }) {
+/**
+ * The foods that added the most calories, as ranked bar rows: the food's avatar, its name, its
+ * calories at the right, and a bar scaled to the top food's, with how many times it was logged at
+ * the bar's end. The kit's `BarRows` has no place for that count, so the rows are drawn here.
+ */
+function TopFoodsCard({ foods }: { foods: TopFood[] }) {
+  const { colors } = useTheme();
+  const shares = relativeToLargest(foods.map((f) => f.calories));
   return (
-    <Group>
-      {foods.map((f) => (
-        <ListRow
-          key={f.name}
-          icon={foodIcon(f.name)}
-          tone="secondary"
-          headline={f.name}
-          // Two lines, each a whole phrase: as one line it is a few letters too long for the row and breaks before its last word.
-          lines={[`Logged ${plural(f.count, 'time')}`, `${percentText(f.share)} of your calories`]}
-          figure={{ value: formatKcal(f.calories), label: 'kcal' }}
-          spoken={`${f.name}, ${formatKcal(f.calories)} calories from ${plural(f.count, 'time')}, ${percentText(f.share)} of your calories`}
-        />
-      ))}
-    </Group>
+    <ChartCard>
+      <View style={styles.rows}>
+        {foods.map((f, i) => (
+          <View
+            key={f.name}
+            style={styles.foodRow}
+            accessible
+            accessibilityLabel={`${f.name}, ${formatKcal(f.calories)} calories from ${plural(f.count, 'time')}, ${percentText(f.share)} of your calories`}>
+            <Avatar icon={foodIcon(f.name)} tone="secondary" size={32} />
+            <View style={styles.foodBody}>
+              <View style={styles.foodHead}>
+                <AppText variant="titleSmall" numberOfLines={2} style={styles.fill}>
+                  {f.name}
+                </AppText>
+                <AppText variant="labelLarge" tabular color={colors.onSurfaceVariant} numberOfLines={1}>
+                  {keepUnits(`${formatKcal(f.calories)} kcal`)}
+                </AppText>
+              </View>
+              <View style={styles.foodBar}>
+                <View style={styles.fill}>
+                  <ProportionBar value={shares[i]} color={colors.primary} height={6} />
+                </View>
+                <AppText variant="labelMedium" tabular color={colors.onSurfaceVariant} numberOfLines={1} style={styles.foodCount}>
+                  {`${f.count}×`}
+                </AppText>
+              </View>
+            </View>
+          </View>
+        ))}
+      </View>
+    </ChartCard>
   );
 }
 
@@ -1250,7 +1396,7 @@ export function InsightCards({
   /** Where a section starts, for the glance tiles to scroll to. */
   onSectionLayout: (section: SectionKey, y: number) => void;
 }) {
-  const { period, weight, calories, weeks, maintenance, macros, exercise, consistency, patterns, topFoods } = insights;
+  const { period, weight, calories, weeks, maintenance, macros, exercise, consistency, patterns, topFoods, everyDay } = insights;
   return (
     <>
       <View onLayout={(e) => onSectionLayout('weight', e.nativeEvent.layout.y)}>
@@ -1279,27 +1425,28 @@ export function InsightCards({
       ) : null}
 
       <View>
-        <SectionHeader title="What you actually burn" hint={maintenance.ready ? CONFIDENCE_LABEL[maintenance.confidence] : undefined} />
+        <SectionHeader title="What you actually burn" />
         {maintenance.ready ? <MaintenanceCard m={maintenance} /> : <NotReadyTile icon="fire" card={maintenance} onAction={onAction} />}
       </View>
 
       <View>
         <SectionHeader title="Macros" hint={macros.ready ? plural(macros.days, 'full day') : undefined} />
-        {macros.ready ? <MacrosCard m={macros} /> : <NotReadyTile icon="egg-outline" card={macros} onAction={onAction} />}
+        {macros.ready ? (
+          <MacrosCard m={macros} days={everyDay.ready ? everyDay.days : []} period={period} />
+        ) : (
+          <NotReadyTile icon="egg-outline" card={macros} onAction={onAction} />
+        )}
       </View>
 
       <View onLayout={(e) => onSectionLayout('exercise', e.nativeEvent.layout.y)}>
-        <SectionHeader title="Exercise" hint={exercise.ready ? formatMinutes(exercise.minutes) : undefined} />
-        {exercise.ready ? <ExerciseGroup e={exercise} period={period} /> : <NotReadyTile icon="run" card={exercise} onAction={onAction} />}
+        <SectionHeader title="Exercise" />
+        {exercise.ready ? <ExerciseCard e={exercise} period={period} /> : <NotReadyTile icon="run" card={exercise} onAction={onAction} tone="tertiary" />}
       </View>
 
       <View onLayout={(e) => onSectionLayout('consistency', e.nativeEvent.layout.y)}>
-        <SectionHeader
-          title="Consistency"
-          hint={consistency.ready ? `${consistency.loggedDays} of ${plural(consistency.countedDays, 'day')} logged` : undefined}
-        />
+        <SectionHeader title="Consistency" />
         {consistency.ready ? (
-          <ConsistencyGroup c={consistency} period={period} onOpenDay={onOpenDay} />
+          <ConsistencyCard c={consistency} period={period} onOpenDay={onOpenDay} />
         ) : (
           <NotReadyTile icon="calendar-check" card={consistency} onAction={onAction} />
         )}
@@ -1308,7 +1455,7 @@ export function InsightCards({
       <View>
         <SectionHeader title="Patterns" hint={patterns.ready ? `From ${plural(patterns.days, 'full day')}` : undefined} />
         {patterns.ready ? (
-          <PatternsGroup p={patterns} onAction={onAction} />
+          <PatternsCard p={patterns} goal={calories.ready ? calories.goal : null} onAction={onAction} />
         ) : (
           <NotReadyTile icon="lightbulb-on-outline" card={patterns} onAction={onAction} />
         )}
@@ -1316,7 +1463,7 @@ export function InsightCards({
 
       <View>
         <SectionHeader title="Top foods" hint={topFoods.ready ? 'Most calories first' : undefined} />
-        {topFoods.ready ? <TopFoodRows foods={topFoods.foods} /> : <NotReadyTile icon="food-outline" card={topFoods} onAction={onAction} />}
+        {topFoods.ready ? <TopFoodsCard foods={topFoods.foods} /> : <NotReadyTile icon="food-outline" card={topFoods} onAction={onAction} />}
       </View>
     </>
   );
@@ -1326,12 +1473,25 @@ const styles = StyleSheet.create({
   fill: { flex: 1, minWidth: 0 },
   shrink: { flexShrink: 1 },
   start: { alignSelf: 'flex-start' },
+  centred: { alignItems: 'center' },
 
   // The one focal tile: the same corners and the same inset as Today's hero.
-  focal: { padding: Spacing.xl, borderRadius: Shape.extraLargeIncreased, gap: Spacing.md },
+  focal: { padding: Spacing.xl, borderRadius: Shape.extraLargeIncreased, gap: Spacing.lg },
   focalHeader: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
-  basis: { flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.md, paddingTop: Spacing.xs },
-  basisItem: { flex: 1, minWidth: 0 },
+  focalFigures: { gap: Spacing.xs },
+  focalChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'center',
+    gap: Spacing.xs,
+    minHeight: 28,
+    paddingLeft: Spacing.sm,
+    paddingRight: Spacing.md,
+    borderRadius: Shape.full,
+  },
+  basis: { flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.md },
+  basisItem: { flex: 1, minWidth: 0, gap: 2 },
+  basisHead: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   focalActions: { gap: Spacing.sm, paddingTop: Spacing.xs },
   focalButton: {
     minHeight: 40,
@@ -1349,7 +1509,7 @@ const styles = StyleSheet.create({
   // rather than being cut short: the width comes from the label, and only its least is set here.
   share: { flexGrow: 1, minWidth: '45%' },
 
-  // Tiles in a grid: the glance tiles and the pairs of small facts.
+  // The glance tiles.
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.sm },
   glance: {
     flexBasis: '45%',
@@ -1361,40 +1521,46 @@ const styles = StyleSheet.create({
     borderRadius: Shape.largeIncreased,
   },
   glanceTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', minHeight: AVATAR_SIZE },
-  fact: {
-    flexBasis: '45%',
-    flexGrow: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.md,
-    minHeight: 72,
-    padding: Spacing.md,
-    borderRadius: Shape.largeIncreased,
-  },
 
-  // A section's pieces: a card, a pair of tiles, a group.
+  // A section's pieces: a card, a group.
   group: { gap: Spacing.sm },
   card: { padding: Spacing.xl, borderRadius: Shape.extraLarge, gap: Spacing.lg },
   // The same inset as the card above it, so the two avatars line up.
-  suggestion: { paddingHorizontal: Spacing.xl, paddingVertical: Spacing.lg, borderRadius: Shape.largeIncreased, gap: Spacing.md },
+  suggestion: { paddingHorizontal: Spacing.xl, paddingVertical: Spacing.xl, borderRadius: Shape.largeIncreased, gap: Spacing.lg },
+  cardHead: { flexDirection: 'row', alignItems: 'center', gap: Spacing.md },
   waitingRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.lg, minHeight: 72, paddingHorizontal: Spacing.lg, paddingVertical: Spacing.md },
 
   // A list row, with GroupRow's measures.
-  row: { flexDirection: 'row', alignItems: 'center', gap: Spacing.lg, paddingHorizontal: Spacing.lg, paddingVertical: Spacing.sm },
-  rowFigure: { alignItems: 'flex-end', maxWidth: 112 },
+  row: { flexDirection: 'row', alignItems: 'center', gap: Spacing.lg, paddingHorizontal: Spacing.lg, paddingVertical: Spacing.md },
+  rowBody: { gap: 2 },
+  rowFigure: { alignItems: 'flex-end', maxWidth: 156 },
   rowFigureLabel: { textAlign: 'right' },
-  listHeader: { paddingHorizontal: Spacing.xs, paddingTop: Spacing.sm, gap: Spacing.xxs },
+  weekFacts: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', columnGap: Spacing.lg, rowGap: Spacing.xs, paddingTop: 2 },
+  weekFact: { flexDirection: 'row', alignItems: 'center', gap: 6 },
 
   // Inside a card.
-  answer: { gap: Spacing.xxs },
+  figureRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', columnGap: Spacing.md, rowGap: Spacing.xs },
   block: { gap: Spacing.sm },
   rows: { gap: Spacing.md },
-  note: { flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.sm },
   finding: { flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.lg },
   findingBody: { flex: 1, minWidth: 0, gap: Spacing.sm },
-  statRow: { flexDirection: 'row', flexWrap: 'wrap', columnGap: Spacing.md, rowGap: Spacing.md },
-  stat: { flexGrow: 1, flexBasis: '28%', minWidth: 84 },
-  barRow: { gap: Spacing.xs },
-  barRowHead: { flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.sm },
-  dot: { width: 8, height: 8, borderRadius: Shape.full, marginTop: 6 },
+  statusChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    minHeight: 28,
+    paddingLeft: Spacing.sm,
+    paddingRight: Spacing.md,
+    borderRadius: Shape.full,
+  },
+  signal: { flexDirection: 'row', alignItems: 'flex-end', gap: 2, height: 12 },
+  signalBar: { width: 3, borderRadius: 1.5 },
+  macroBar: { gap: Spacing.xs },
+  macroHead: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
+  dot: { width: 8, height: 8, borderRadius: Shape.full },
+  foodRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.md },
+  foodBody: { flex: 1, minWidth: 0, gap: 6 },
+  foodHead: { flexDirection: 'row', alignItems: 'baseline', gap: Spacing.sm },
+  foodBar: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
+  foodCount: { minWidth: 28, textAlign: 'right' },
 });

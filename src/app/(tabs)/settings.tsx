@@ -4,11 +4,13 @@ import { ActivityIndicator, Alert, AppState, Linking, Platform, ScrollView, Styl
 import { requestPinWidget } from 'react-native-android-widget';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { Disclosure } from '@/components/glance';
 import {
   backupProblemsText,
   countBackup,
-  goalPlanText,
+  goalPlan,
   goalStatusText,
+  healthSync,
   healthText,
   keepUnits,
   restoreConfirmText,
@@ -16,7 +18,8 @@ import {
   WEIGHT_RANGE_HINT,
   type DataCounts,
 } from '@/components/screen-text';
-import { ActionRow, ButtonRow, Cue, ExpanderRow, FieldCard, litTone, Panel, ROOMY_FONT_SCALE } from '@/components/settings-parts';
+import { ActionRow, ButtonRow, Cue, ExpanderRow, FieldCard, litTone, Panel, Pill, ROOMY_FONT_SCALE, SyncIcons } from '@/components/settings-parts';
+import { MacroFigures } from '@/components/sheet-parts';
 import { useSnackbar } from '@/components/snackbar';
 import { foodIcon, MEAL_ICONS } from '@/components/today-tiles';
 import {
@@ -34,7 +37,6 @@ import {
   Switch,
   TextField,
 } from '@/components/ui';
-import { categoryColors, type Category } from '@/constants/category-colors';
 import { VOICE_LOGGING } from '@/constants/features';
 import { Shape, Spacing, Type } from '@/constants/theme';
 import { useLiveQuery, useToday } from '@/hooks/use-live-query';
@@ -67,6 +69,7 @@ import {
   calculateTargets,
   formatKcal,
   GOAL_LABELS,
+  MIN_CALORIE_TARGET,
   GOAL_RATES,
   goalRateKg,
   type ActivityLevel,
@@ -135,15 +138,8 @@ export default function SettingsScreen() {
 
 const DEFAULT_PROFILE: Profile = { sex: 'male', age: 30, heightCm: 170, weightKg: 70, activity: 'light', goal: 'lose_fat', rateKg: 0.5 };
 
-const MACROS: { key: Category; label: string }[] = [
-  { key: 'protein', label: 'Protein' },
-  { key: 'carbs', label: 'Carbs' },
-  { key: 'fat', label: 'Fat' },
-];
-
 function TargetsSection() {
-  const { colors, dark } = useTheme();
-  const palette = categoryColors(colors.primary, dark);
+  const { colors } = useTheme();
   const { fontScale } = useWindowDimensions();
   const showSnack = useSnackbar();
   const today = useToday();
@@ -169,10 +165,12 @@ function TargetsSection() {
     if (!rateRange) return '';
     const typed = profile.rateKg;
     const used = goalRateKg(profile);
-    const range = `Between ${rateRange.min} and ${rateRange.max} kg.`;
-    return typed !== undefined && typed > 0 && Math.abs(typed - used) > 1e-9 ? `${range} Using ${used} kg.` : range;
+    const range = `${rateRange.min} to ${rateRange.max} kg a week`;
+    return typed !== undefined && typed > 0 && Math.abs(typed - used) > 1e-9 ? `${range}. Using ${used} kg` : range;
   })();
   const setP = (patch: Partial<Profile>) => setProfile((p) => ({ ...p, ...patch }));
+  // The plan in figures for the result card, and in words for the disclosure under it.
+  const plan = goalPlan(profile, settings.weightGoalKg);
 
   const save = (patch: Parameters<typeof updateSettings>[0]) => {
     updateSettings(patch);
@@ -304,7 +302,8 @@ function TargetsSection() {
             icon="walk"
             tone={litTone(settings.countExerciseCalories, 'tertiary')}
             headline="Add activity from other apps"
-            supporting="Active calories this phone counts through Google Fit and Health Connect. Workouts you log here always count."
+            supporting="Logged workouts count either way"
+            accessibilityHint="Active calories this phone counts through Google Fit and Health Connect. Workouts you log here always count."
             trailing={
               <Switch
                 value={settings.countExerciseCalories}
@@ -317,7 +316,7 @@ function TargetsSection() {
             icon="calculator-variant-outline"
             tone="primary"
             headline="Work out my targets"
-            supporting="From your age, height, weight and activity"
+            supporting="From age, height, weight and activity"
             open={showCalc}
             onPress={toggleCalc}
           />
@@ -371,52 +370,62 @@ function TargetsSection() {
                   ))}
                 </View>
                 {rateRange ? (
-                  <Row style={styles.fieldRow}>
-                    <NumberField
-                      key={profile.goal}
-                      label={profile.goal === 'build_muscle' ? 'Gain' : 'Lose'}
-                      suffix="kg a week"
-                      decimals={2}
-                      maxDecimals={2}
-                      selectOnFocus
-                      value={profile.rateKg ?? rateRange.usual}
-                      onChange={(rateKg) => setP({ rateKg })}
-                    />
-                  </Row>
+                  <View style={styles.fieldWithNote}>
+                    <Row style={styles.fieldRow}>
+                      <NumberField
+                        key={profile.goal}
+                        label={profile.goal === 'build_muscle' ? 'Gain' : 'Lose'}
+                        suffix="kg a week"
+                        decimals={2}
+                        maxDecimals={2}
+                        selectOnFocus
+                        value={profile.rateKg ?? rateRange.usual}
+                        onChange={(rateKg) => setP({ rateKg })}
+                      />
+                    </Row>
+                    <AppText variant="bodyMedium" color={colors.onSurfaceVariant} style={styles.fieldNote}>
+                      {rateText}
+                    </AppText>
+                  </View>
                 ) : null}
-                <AppText variant="bodyMedium" color={colors.onSurfaceVariant}>
-                  {rateRange ? `${rateText} ` : ''}
-                  {goalPlanText(profile, goal)}
-                </AppText>
               </View>
-              {/* What the calculator came to, lit as a food figure: the calories, the three macros
-                  with their colours as Today's day summary draws them, and the button that uses them. */}
+              {/* What the calculator came to, lit as a food figure: the calories, how they sit against what
+                  the body burns and when the pace reaches the target, the three macros with their colours
+                  as Today draws them, and the button that uses them. The sentences are one tap below. */}
               <View style={[styles.result, { backgroundColor: colors.primaryContainer }]}>
-                <AppText variant="titleLarge" emphasized tabular color={on}>
-                  {`${formatKcal(preview.calories)}\u00A0kcal a day`}
-                </AppText>
-                <View
-                  style={styles.facts}
-                  accessible
-                  accessibilityLabel={`${preview.protein} g protein, ${preview.carbs} g carbs, ${preview.fat} g fat`}>
-                  {MACROS.map((m) => (
-                    <View key={m.key} style={styles.fact}>
-                      <AppText variant="titleMedium" emphasized tabular color={on} numberOfLines={1}>
-                        {`${preview[m.key]}\u00A0g`}
-                      </AppText>
-                      <View style={styles.factLabel}>
-                        <View style={[styles.dot, { backgroundColor: palette[m.key].color }]} />
-                        <AppText variant="bodySmall" color={on} numberOfLines={1}>
-                          {m.label}
-                        </AppText>
-                      </View>
-                    </View>
-                  ))}
+                <View accessible accessibilityLabel={`${preview.calories} calories a day`}>
+                  <AppText variant="headlineSmall" emphasized tabular color={on}>
+                    {formatKcal(preview.calories)}
+                    <AppText variant="bodyLarge" color={on}>
+                      {'\u00A0kcal a day'}
+                    </AppText>
+                  </AppText>
                 </View>
-                <AppText variant="bodyMedium" color={on} textBreakStrategy="balanced">
-                  An estimate from a standard formula. After 2 to 3 weeks of weigh-ins and logged meals, Progress shows what you
-                  really burn.
-                </AppText>
+                <View style={styles.pills} accessible accessibilityLabel={plan.text}>
+                  <Pill
+                    icon={plan.kcalVsBurn < 0 ? 'arrow-down' : plan.kcalVsBurn > 0 ? 'arrow-up' : 'trending-neutral'}
+                    label={
+                      plan.kcalVsBurn === 0
+                        ? 'What you burn'
+                        : `${formatKcal(Math.abs(plan.kcalVsBurn))}\u00A0kcal ${plan.kcalVsBurn < 0 ? 'under' : 'over'} your burn`
+                    }
+                    color={on}
+                  />
+                  {plan.weeks !== null && plan.targetKg !== null ? (
+                    <Pill icon="flag-variant-outline" label={`${formatKg(plan.targetKg)} in about ${plan.weeks} ${plan.weeks === 1 ? 'week' : 'weeks'}`} color={on} />
+                  ) : null}
+                </View>
+                {/* The grams as every sheet draws them, so a target reads like the day it is for. */}
+                <MacroFigures
+                  totals={preview}
+                  color={on}
+                  accessibilityLabel={`${preview.protein} g protein, ${plan.proteinPerKg} g per kg, ${preview.carbs} g carbs, ${preview.fat} g fat`}
+                />
+                {plan.floored ? (
+                  <AppText variant="bodyMedium" color={on} textBreakStrategy="balanced">
+                    {`Held at ${formatKcal(MIN_CALORIE_TARGET)}\u00A0kcal, the lowest this suggests`}
+                  </AppText>
+                ) : null}
                 <Button
                   title="Use these targets"
                   icon="check"
@@ -429,6 +438,10 @@ function TargetsSection() {
                   }}
                 />
               </View>
+              <Disclosure>
+                {plan.text}
+                {'An estimate from a standard formula. After 2 to 3 weeks of weigh-ins and logged meals, Progress shows what you really burn.'}
+              </Disclosure>
             </Panel>
           ) : null}
         </Group>
@@ -541,7 +554,7 @@ function RemindersSection() {
             icon="bell-off-outline"
             tone="ring"
             headline="Notifications are off"
-            supporting="Reminders cannot reach you until they are allowed"
+            supporting="Reminders can’t reach you yet"
             onPress={() => void allowNotifications()}
             accessibilityLabel="Notifications are off. Reminders cannot reach you until they are allowed. Allow notifications"
             button={
@@ -559,7 +572,7 @@ function RemindersSection() {
           icon="bell-outline"
           tone={litTone(settings.remindersEnabled, 'secondary')}
           headline="Remind me to log meals"
-          supporting="Skipped once you've logged that meal"
+          supporting="Skipped once it’s logged"
           trailing={
             <Switch value={settings.remindersEnabled} onValueChange={(v) => void apply({ remindersEnabled: v }, !v)} accessibilityLabel="Meal reminders" />
           }
@@ -573,7 +586,7 @@ function RemindersSection() {
                   icon={MEAL_ICONS[meal]}
                   tone={litTone(r.enabled, 'secondary')}
                   headline={MEAL_LABELS[meal]}
-                  supporting={r.enabled ? `Reminds you at ${formatTime(r.hour, r.minute)}` : 'Off'}
+                  supporting={r.enabled ? `At ${formatTime(r.hour, r.minute)}` : 'Off'}
                   onPress={r.enabled ? () => pickMealTime(meal) : undefined}
                   accessibilityLabel={`${MEAL_LABELS[meal]} reminder time, ${formatTime(r.hour, r.minute)}`}
                   trailing={
@@ -594,7 +607,7 @@ function RemindersSection() {
           headline="Remind me to weigh in"
           supporting={
             weighIn.enabled
-              ? `Reminds you at ${formatTime(weighIn.hour, weighIn.minute)}. Skipped once you've weighed in`
+              ? `At ${formatTime(weighIn.hour, weighIn.minute)}, unless you’ve weighed in`
               : 'Once a day, at a time you choose'
           }
           onPress={weighIn.enabled ? () => pickTime(weighIn, (next) => void apply({ weighInReminder: next })) : undefined}
@@ -611,7 +624,8 @@ function RemindersSection() {
           icon="lightbulb-on-outline"
           tone={litTone(settings.headsUpNotifications, 'secondary')}
           headline="Heads up"
-          supporting="A morning note when something stands out: an unusual day, a gap, a new best. One a day at most"
+          supporting="A morning note when it matters"
+          accessibilityHint="When something stands out: an unusual day, a gap, a new best. One a day at most."
           trailing={
             <Switch
               value={settings.headsUpNotifications}
@@ -734,6 +748,7 @@ function HealthSection() {
         ...(text.weight ? [{ what: 'weight' as const, icon: 'scale-bathroom' as const, label: 'Allow weight', ...text.weight }] : []),
       ];
   const connected = settings.healthConnectEnabled;
+  const sync = healthSync(connected, grants);
   return (
     <View>
       <SectionHeader title="Google Fit and Health Connect" />
@@ -744,11 +759,13 @@ function HealthSection() {
           headline={connected ? 'Connected' : 'Not connected'}
           supporting={
             availability === 'unavailable'
-              ? 'Health Connect isn’t available on this phone'
+              ? 'Not available on this phone'
               : availability === 'needs_update'
                 ? 'Update Health Connect from the Play Store'
-                : text.status
+                : sync.line
           }
+          // What syncs, lit or not; the sentence it stands for is what a screen reader hears.
+          extra={!unavailable && sync.items.length > 0 ? <SyncIcons items={sync.items} label={text.status} /> : undefined}
           actions={
             unavailable ? undefined : connected ? (
               <Button title="Stop syncing" variant="tonal" hitSlop={4} onPress={() => void disconnect()} />
@@ -814,7 +831,7 @@ function WidgetSection() {
           icon="widgets-outline"
           tone="primary"
           headline="Quick log (4×2)"
-          supporting={VOICE_LOGGING ? 'Calories left, one-tap favourites, and Say it or Type it' : 'Calories left, one-tap favourites, and Log food'}
+          supporting={VOICE_LOGGING ? 'Calories left, favourites, Say it or Type it' : 'Calories left, favourites and Log food'}
           onPress={() => void pin(WIDGET_QUICK_LOG)}
           trailing={<IconButton icon="plus" variant="tonal" label="Add Quick log widget" onPress={() => void pin(WIDGET_QUICK_LOG)} />}
         />
@@ -880,7 +897,7 @@ function AiSection() {
           icon="key-outline"
           tone={litTone(hasKey, 'secondary')}
           headline="API key"
-          supporting={`${keyStatus}. Free keys: console.groq.com/keys`}
+          supporting={keyStatus}
         />
         <Panel>
           <TextField
@@ -888,6 +905,7 @@ function AiSection() {
             value={key}
             onChangeText={setKey}
             placeholder={hasStored ? '•••••••• (saved)' : 'gsk_…'}
+            supportingText="Free keys at console.groq.com/keys"
             secureTextEntry
             autoCapitalize="none"
             autoCorrect={false}
@@ -1011,14 +1029,14 @@ function DataSection({ onRestored }: { onRestored: () => void }) {
         <GroupRow
           icon="export-variant"
           headline="Export backup"
-          supporting="Food, workouts, weigh-ins and settings in one file, without your API key"
+          supporting="Everything but your API key, in one file"
           onPress={() => void exportNow()}
           trailing={busy === 'export' ? busyMark : <Cue />}
         />
         <GroupRow
           icon="backup-restore"
           headline="Restore from backup"
-          supporting="Replaces everything on this phone, after you confirm"
+          supporting="Replaces all data, once you confirm"
           onPress={() => void chooseBackup()}
           trailing={busy === 'restore' ? busyMark : <Cue />}
         />
@@ -1037,8 +1055,13 @@ function FavouritesSection() {
   return (
     <View>
       <SectionHeader title="Saved foods" hint={count} />
-      <AppText variant="bodyMedium" color={colors.onSurfaceVariant} textBreakStrategy="balanced" style={styles.sectionNote}>
-        Starred foods always appear on Today and the widget. The AI reuses your numbers for these.
+      <AppText
+        variant="bodyMedium"
+        color={colors.onSurfaceVariant}
+        textBreakStrategy="balanced"
+        accessibilityLabel="Starred foods always appear on Today and the widget. The AI reuses your numbers for these."
+        style={styles.sectionNote}>
+        Starred ones show on Today and the widget
       </AppText>
       <Group>
         {foods.slice(0, FOODS_SHOWN).map((f) => (
@@ -1093,10 +1116,7 @@ const styles = StyleSheet.create({
   choice: { gap: Spacing.sm },
   wrap: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.sm },
   result: { borderRadius: Shape.largeIncreased, padding: Spacing.lg, gap: Spacing.md },
-  facts: { flexDirection: 'row' },
-  fact: { flex: 1 },
-  factLabel: { flexDirection: 'row', alignItems: 'center', gap: Spacing.xs },
-  dot: { width: Spacing.sm, height: Spacing.sm, borderRadius: Shape.full },
+  pills: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.sm },
   end: { alignSelf: 'flex-end' },
   cueSlot: { width: 24, height: 24, alignItems: 'center', justifyContent: 'center' },
   // Wraps, so buttons that do not fit side by side at a large font size stack instead of clipping.

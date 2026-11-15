@@ -24,11 +24,24 @@ export interface CoachInput {
   foods: readonly SavedFood[];
 }
 
+/** Which next step the coach is giving. */
+export type CoachKind = 'morning' | 'not-logged' | 'over' | 'protein' | 'surplus' | 'protein-done';
+
 export interface CoachTip {
+  kind: CoachKind;
+  /** The whole tip as a sentence: what a screen reader says, and the words the card's picture replaces. */
   title: string;
   body: string;
   /** Saved foods that fit what is left, best first; logged with one tap. */
   suggestions: SavedFood[];
+  /** The card's one number ("55 g" and "protein to go"); null when the tip has none. */
+  figure: { value: string; unit: string } | null;
+  /** Protein eaten against its goal, grams, for the card's bar; null when the tip is not about protein. */
+  protein: { eaten: number; goal: number } | null;
+  /** Calories left in today's budget, whole kcal; below zero when over. */
+  kcalLeft: number;
+  /** At most one short line (about 60 characters) under the picture; null when the picture says it all. */
+  line: string | null;
 }
 
 /** Protein left below this many grams counts as reached. */
@@ -64,15 +77,29 @@ export function coachTip(input: CoachInput): CoachTip | null {
     if (hour < 11) {
       const picks = proteinGoal > 0 ? proteinFoods(foods, budget / 3) : [];
       return {
+        kind: 'morning',
         title: proteinGoal > 0 ? `${g(proteinGoal)} of protein today` : 'A fresh day',
         body:
           proteinGoal > 0
             ? `Getting 25 to 40 g at breakfast makes the goal much easier to reach.${picks.length ? ' From your foods:' : ''}`
             : 'Log breakfast when you have it.',
         suggestions: picks,
+        figure: proteinGoal > 0 ? { value: g(proteinGoal), unit: 'protein today' } : null,
+        protein: null,
+        kcalLeft: left,
+        line: proteinGoal > 0 ? '25 to 40 g at breakfast makes it much easier.' : 'Log breakfast when you have it.',
       };
     }
-    return { title: 'Nothing logged yet today', body: 'Log what you have eaten so far, so today counts in your averages.', suggestions: [] };
+    return {
+      kind: 'not-logged',
+      title: 'Nothing logged yet today',
+      body: 'Log what you have eaten so far, so today counts in your averages.',
+      suggestions: [],
+      figure: null,
+      protein: null,
+      kcalLeft: left,
+      line: 'Log what you have eaten so far, so today counts.',
+    };
   }
 
   if (left < 0) {
@@ -83,36 +110,62 @@ export function coachTip(input: CoachInput): CoachTip | null {
         : goal === 'maintain'
           ? 'One day over is fine. What matters is being close to your goal across the week.'
           : 'One day over will not undo your progress: your weekly average is what moves your weight. Keep the next meal light.';
-    return { title: `${over} over today`, body, suggestions: [] };
+    const line =
+      goal === 'build_muscle'
+        ? 'A surplus is what building muscle needs.'
+        : goal === 'maintain'
+          ? 'One day over is fine; the week is what counts.'
+          : 'Your weekly average is what moves your weight.';
+    return { kind: 'over', title: `${over} over today`, body, suggestions: [], figure: { value: over, unit: 'over today' }, protein: null, kcalLeft: left, line };
   }
+
+  const protein = proteinGoal > 0 ? { eaten: Math.round(eaten.protein), goal: Math.round(proteinGoal) } : null;
 
   if (proteinLeft >= PROTEIN_CLOSE_G) {
     const picks = proteinFoods(foods, left);
     const room = `${kcal(left)} left.`;
     const muscle = goal === 'build_muscle' || goal === 'recomp' ? ' Protein is what turns your training into muscle.' : '';
     return {
+      kind: 'protein',
       title: `${g(proteinLeft)} of protein to go`,
       body: picks.length
         ? `${room}${muscle} These from your foods fit:`
         : `${room}${muscle} Eggs, chicken, fish, paneer, tofu, dal or Greek yogurt fit best.`,
       suggestions: picks,
+      figure: { value: g(proteinLeft), unit: 'protein to go' },
+      protein,
+      kcalLeft: left,
+      // The chips are the answer when there are any; without them, the foods that fit best.
+      line: picks.length ? (muscle ? 'Protein is what turns your training into muscle.' : null) : 'Eggs, chicken, fish, paneer, tofu, dal or Greek yogurt fit best.',
     };
   }
 
   if (goal === 'build_muscle' && left >= 300 && hour >= 17) {
     const picks = fillingFoods(foods, left);
     return {
+      kind: 'surplus',
       title: `${kcal(left)} left to eat`,
       body: `Your protein is in. Building muscle needs the surplus too, so eat the rest today.${picks.length ? ' From your foods:' : ''}`,
       suggestions: picks,
+      figure: { value: kcal(left), unit: 'left to eat' },
+      protein,
+      kcalLeft: left,
+      // "Protein is in" is the full protein bar the card draws; the line says only what it cannot.
+      line: 'Building muscle needs the surplus too.',
     };
   }
 
   if (proteinGoal > 0) {
+    const reached = proteinLeft <= 0;
     return {
-      title: proteinLeft <= 0 ? 'Protein goal reached' : 'Protein nearly there',
+      kind: 'protein-done',
+      title: reached ? 'Protein goal reached' : 'Protein nearly there',
       body: left > 0 ? `${kcal(left)} left for the rest of the day.` : 'Right on your calories for the day.',
       suggestions: [],
+      figure: { value: g(eaten.protein), unit: reached ? 'protein, goal reached' : 'protein, nearly there' },
+      protein,
+      kcalLeft: left,
+      line: left > 0 ? null : 'Right on your calories for the day.',
     };
   }
   return null;

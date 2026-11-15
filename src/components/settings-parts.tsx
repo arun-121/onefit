@@ -9,15 +9,19 @@
  *  - `ButtonRow`: a row with a short button at its end, which moves under the words at a large
  *    font size.
  *  - `ExpanderRow` and `Panel`: a row that opens, and the part that opens under it. Both are rows
- *    of the same `Group`, so the open part reads as belonging to the row above it.
+ *    of the same `Group`, so the open part reads as belonging to the row above it. `Chevron` is
+ *    that row's cue, for a sheet row that opens the same way (the exercise sheet's drafts).
  *  - `Cue`: the small icon at the end of a row that says what a tap does.
+ *  - `SyncIcons`: what syncs with Health Connect, one lit or unlit icon each.
+ *  - `Pill`: a quiet fact on a lit card, such as the calculator's result.
  */
 import { useEffect, type ReactNode } from 'react';
 import { StyleSheet, useWindowDimensions, View, type StyleProp, type ViewStyle } from 'react-native';
-import Animated, { Easing, ReduceMotion, useAnimatedStyle, useSharedValue, withSpring, withTiming } from 'react-native-reanimated';
+import Animated, { Easing, ReduceMotion, useAnimatedStyle, useReducedMotion, useSharedValue, withTiming } from 'react-native-reanimated';
 
-import { Shape, Spacing, Springs } from '@/constants/theme';
+import { AVATAR_SIZE, Shape, Spacing, withAlpha } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
+import type { SyncItem, SyncKey } from './screen-text';
 import { AppText, Avatar, GroupItem, GroupRow, Icon, type AvatarTone, type IconName } from './ui';
 
 /**
@@ -69,6 +73,7 @@ export function ActionRow({
   headline,
   supporting,
   actions,
+  extra,
   onPress,
   accessibilityLabel,
 }: {
@@ -78,6 +83,8 @@ export function ActionRow({
   supporting?: string;
   /** One or two `Button`s. Left out, the row is the words alone. */
   actions?: ReactNode;
+  /** A small picture under the words, lined up with them, such as `SyncIcons`. */
+  extra?: ReactNode;
   onPress?: () => void;
   accessibilityLabel?: string;
 }) {
@@ -87,6 +94,7 @@ export function ActionRow({
         <Avatar icon={icon} tone={tone} />
         <RowText headline={headline} supporting={supporting} />
       </View>
+      {extra ? <View style={styles.extra}>{extra}</View> : null}
       {actions ? <View style={styles.actions}>{actions}</View> : null}
     </GroupItem>
   );
@@ -141,11 +149,22 @@ export function ButtonRow({
   );
 }
 
-/** The chevron of a row that opens. It turns over as the row opens, with the spring every selection uses. */
-function Chevron({ open }: { open: boolean }) {
+/** Emil Kowalski's strong ease-out, the curve "How it's worked out" opens on: the movement starts at once. */
+const EASE_OUT = Easing.bezier(0.23, 1, 0.32, 1);
+/** Opening takes 200ms, closing 150ms, as the disclosure does: the answer to a tap is quick, going away quicker. */
+const OPEN_MS = 200;
+const CLOSE_MS = 150;
+
+/**
+ * The chevron of a row that opens. It turns over as the row opens, on the same timing as the
+ * chevron of "How it's worked out", so every chevron in the app turns alike (a timing can be
+ * turned round mid-way by a second tap). Also the cue on a sheet's row that opens its editor
+ * under it (the exercise sheet).
+ */
+export function Chevron({ open }: { open: boolean }) {
   const turn = useSharedValue(open ? 1 : 0);
   useEffect(() => {
-    turn.set(withSpring(open ? 1 : 0, Springs.spatial));
+    turn.set(withTiming(open ? 1 : 0, { duration: open ? OPEN_MS : CLOSE_MS, easing: EASE_OUT, reduceMotion: ReduceMotion.System }));
   }, [open, turn]);
   const turned = useAnimatedStyle(() => ({ transform: [{ rotate: `${turn.get() * 180}deg` }] }));
   return (
@@ -188,22 +207,74 @@ export function ExpanderRow({
  * sheets use, so chips and fields show on it. It is its own row of the `Group`, straight after
  * the row it belongs to.
  *
- * With `appear`, its content fades and settles in when it is added (180 ms, ease-out): the rows
- * under it have just jumped down, and content that arrived with no transition would read as a
- * glitch. Opened perhaps once a month, so the motion costs nothing. Leave `appear` off for a
- * panel that is always there.
+ * With `appear`, its content fades and settles in when it is added (200 ms on the strong ease-out,
+ * with the chevron above it): the rows under it have just jumped down, and content that arrived
+ * with no transition would read as a glitch. Opened now and then, so the motion costs nothing.
+ * With the phone's "Remove animations" on it only fades, as the disclosure does. Leave `appear`
+ * off for a panel that is always there.
+ *
+ * `color` is for a group that sits on a sheet, whose ground is already `surfaceContainerLow`: there
+ * the panel takes the rows' own fill, so it does not read as a hole in the group.
  */
-export function Panel({ children, appear = false }: { children: ReactNode; appear?: boolean }) {
+export function Panel({ children, appear = false, color }: { children: ReactNode; appear?: boolean; color?: string }) {
   const { colors } = useTheme();
+  const reduceMotion = useReducedMotion();
   const shown = useSharedValue(appear ? 0 : 1);
   useEffect(() => {
-    shown.set(withTiming(1, { duration: 180, easing: Easing.out(Easing.cubic), reduceMotion: ReduceMotion.System }));
+    // Reduced motion is handled here, not by the system default, which would also skip the fade.
+    shown.set(withTiming(1, { duration: OPEN_MS, easing: EASE_OUT, reduceMotion: ReduceMotion.Never }));
   }, [shown]);
-  const settle = useAnimatedStyle(() => ({ opacity: shown.get(), transform: [{ translateY: (shown.get() - 1) * Spacing.sm }] }));
+  const rise = reduceMotion ? 0 : Spacing.sm;
+  const settle = useAnimatedStyle(() => ({ opacity: shown.get(), transform: [{ translateY: (shown.get() - 1) * rise }] }));
   return (
-    <GroupItem color={colors.surfaceContainerLow}>
+    <GroupItem color={color ?? colors.surfaceContainerLow}>
       <Animated.View style={[styles.panel, settle]}>{children}</Animated.View>
     </GroupItem>
+  );
+}
+
+const SYNC_LOOK: Record<SyncKey, { icon: IconName; tone: AvatarTone }> = {
+  meals: { icon: 'silverware-fork-knife', tone: 'primary' },
+  workouts: { icon: 'run', tone: 'tertiary' },
+  weight: { icon: 'scale-bathroom', tone: 'primary' },
+  activity: { icon: 'shoe-print', tone: 'tertiary' },
+};
+
+/**
+ * What syncs with Health Connect, as a row of small avatars with a word under each: lit in the
+ * subject's container colour while it syncs (food and weight primary, movement tertiary), a plain
+ * ring while it does not, the way Today lights a tile. One element to a screen reader, which says
+ * `label`, the sentence the icons stand for.
+ */
+export function SyncIcons({ items, label }: { items: readonly SyncItem[]; label: string }) {
+  const { colors } = useTheme();
+  return (
+    <View style={styles.sync} accessible accessibilityLabel={label}>
+      {items.map((item) => (
+        <View key={item.key} style={styles.syncItem}>
+          <Avatar icon={SYNC_LOOK[item.key].icon} tone={item.on ? SYNC_LOOK[item.key].tone : 'ring'} size={32} />
+          <AppText variant="labelSmall" color={item.on ? colors.onSurface : colors.onSurfaceVariant} numberOfLines={1} maxFontSizeMultiplier={1.5}>
+            {item.label}
+          </AppText>
+        </View>
+      ))}
+    </View>
+  );
+}
+
+/**
+ * A quiet fact on a lit card: an icon and a few words in the card's on-colour, on a faint tint of
+ * it. Not pressable. For a lit card the delta chip cannot sit on, since its filled state is the
+ * card's own container colour.
+ */
+export function Pill({ icon, label, color }: { icon: IconName; label: string; color: string }) {
+  return (
+    <View style={[styles.pill, { backgroundColor: withAlpha(color, 0.1) }]}>
+      <Icon name={icon} size={16} color={color} />
+      <AppText variant="labelLarge" emphasized tabular color={color} numberOfLines={2} style={styles.pillText}>
+        {label}
+      </AppText>
+    </View>
   );
 }
 
@@ -232,5 +303,21 @@ const styles = StyleSheet.create({
     paddingBottom: Spacing.sm,
   },
   card: { borderRadius: Shape.largeIncreased, padding: Spacing.lg, gap: Spacing.lg },
+  // Under the words, so it starts where the headline does.
+  extra: { paddingLeft: AVATAR_SIZE + Spacing.lg, paddingBottom: Spacing.xs },
+  sync: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.md },
+  syncItem: { alignItems: 'center', gap: Spacing.xs, minWidth: 48 },
+  pill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    gap: Spacing.xs,
+    minHeight: 28,
+    paddingLeft: Spacing.sm,
+    paddingRight: Spacing.md,
+    paddingVertical: 2,
+    borderRadius: Shape.full,
+  },
+  pillText: { flexShrink: 1 },
   panel: { padding: Spacing.lg, gap: Spacing.lg },
 });

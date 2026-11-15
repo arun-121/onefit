@@ -123,6 +123,61 @@ export function changeSincePrevious(kg: number, previous: WeighInRef | null, tod
   };
 }
 
+/** A change between two weigh-ins as the delta chip shows it, with the sentence it stands for. */
+export interface WeightChange extends WeightChangeLine {
+  /** What the chip says: "0.4 kg", or "No change". */
+  amount: string;
+  /**
+   * The words after the chip: "since yesterday (78.8 kg)". With no change the earlier weight is
+   * left out ("since yesterday"): it is the weight already shown beside the chip.
+   */
+  since: string;
+  /** The change takes the weight toward the target. False with no target, no change, or a change away from it. */
+  towardGoal: boolean;
+}
+
+/**
+ * `changeSincePrevious`, split for a delta chip and the short line beside it, and whether the
+ * change is toward the target weight (measured from the earlier weigh-in, so a step past the
+ * target still counts as toward it). The whole sentence stays in `text`, for a screen reader.
+ */
+export function weightChange(kg: number, previous: WeighInRef | null, today: string, goalKg: number | null = null): WeightChange | null {
+  const line = changeSincePrevious(kg, previous, today);
+  if (!line || !previous) return null;
+  const goal = goalKg !== null && isValidWeightKg(goalKg) ? goalKg : null;
+  const wanted = goal === null ? 0 : goal < previous.kg - 0.05 ? -1 : goal > previous.kg + 0.05 ? 1 : 0;
+  const moved = line.direction === 'down' ? -1 : line.direction === 'up' ? 1 : 0;
+  return {
+    ...line,
+    amount: line.direction === 'flat' ? 'No change' : `${Math.abs(line.deltaKg).toFixed(1)} kg`,
+    since: `since ${dayWords(previous.date, today)}${line.direction === 'flat' ? '' : ` (${formatKg(previous.kg)})`}`,
+    towardGoal: wanted !== 0 && moved === wanted,
+  };
+}
+
+// ---------------------------------------------------------------- exercise sheet
+
+/** How hard an exercise is, from its MET: the Compendium of Physical Activities' three bands. */
+export interface Effort {
+  /** 1 light (under 3 MET), 2 moderate (3 to 6), 3 vigorous (6 and up); 0 when the MET is not a number. */
+  level: 0 | 1 | 2 | 3;
+  /** "6 MET", "3.5 MET", or '' when there is none. */
+  figure: string;
+  /** "Effort 6 MET, vigorous", for a screen reader. */
+  spoken: string;
+}
+
+const EFFORT_WORDS = ['', 'light', 'moderate', 'vigorous'] as const;
+
+export function effortLevel(met: number): Effort {
+  if (!Number.isFinite(met) || met <= 0) return { level: 0, figure: '', spoken: 'Effort not known' };
+  // Banded as shown, so "6 MET" never draws as moderate.
+  const shown = Math.round(met * 10) / 10;
+  const level = shown < 3 ? 1 : shown < 6 ? 2 : 3;
+  const figure = `${shown.toLocaleString('en-US')} MET`;
+  return { level, figure, spoken: `Effort ${figure}, ${EFFORT_WORDS[level]}` };
+}
+
 // ---------------------------------------------------------------- Today tiles
 
 export interface TileText {
@@ -272,7 +327,7 @@ export interface WorkoutRef {
  */
 export function exerciseTileText(workouts: readonly WorkoutRef[]): TileText {
   if (workouts.length === 0) {
-    return { title: 'Log exercise', detail: 'Adds to today’s budget', icon: null, lit: false, label: 'Log exercise' };
+    return { title: 'Log exercise', detail: 'Adds to budget', icon: null, lit: false, label: 'Log exercise' };
   }
   const amount = (n: number): number => (Number.isFinite(n) && n > 0 ? n : 0);
   const kcal = Math.round(workouts.reduce((sum, w) => sum + amount(w.calories), 0));
@@ -376,16 +431,51 @@ export function healthText(connected: boolean, grants: HealthGrants | null): Hea
     grants.writeWeight && grants.readWeight
       ? null
       : !grants.writeWeight && !grants.readWeight
-        ? { headline: 'Weight is not shared', supporting: 'Send weigh-ins to Google Fit and read them from your scale' }
+        ? { headline: 'Weight is not shared', supporting: 'Send weigh-ins and read your scale' }
         : grants.writeWeight
-          ? { headline: 'Weigh-ins are not read', supporting: 'Bring in weigh-ins from a scale or Google Fit' }
+          ? { headline: 'Weigh-ins are not read', supporting: 'Read weigh-ins from a scale' }
           : { headline: 'Weigh-ins are not sent', supporting: 'Send your weigh-ins to Google Fit' };
 
   return {
     status,
-    workouts: grants.writeExercise ? null : { headline: 'Workouts are not shared', supporting: 'Send the workouts you log to Google Fit' },
+    workouts: grants.writeExercise ? null : { headline: 'Workouts are not shared', supporting: 'Send logged workouts to Google Fit' },
     weight,
   };
+}
+
+export type SyncKey = 'meals' | 'workouts' | 'weight' | 'activity';
+
+export interface SyncItem {
+  key: SyncKey;
+  /** One word under its icon: "Meals". */
+  label: string;
+  /** It goes to (or comes from) Health Connect now. */
+  on: boolean;
+}
+
+export interface HealthSync {
+  /** The short line under "Connected" or "Not connected". */
+  line: string;
+  /** What syncs, one icon each, lit while it does. Empty until the grants have been read. */
+  items: SyncItem[];
+}
+
+/**
+ * The Health Connect row as a picture: a short line and one lit or unlit icon for each thing
+ * that can sync (meals, workouts and weigh-ins out, steps and activity in). The full sentence of
+ * `healthText` stays the row's spoken label, so nothing it said is lost.
+ */
+export function healthSync(connected: boolean, grants: HealthGrants | null): HealthSync {
+  const items = (g: HealthGrants | null): SyncItem[] => [
+    { key: 'meals', label: 'Meals', on: !!g?.writeNutrition },
+    { key: 'workouts', label: 'Workouts', on: !!g?.writeExercise },
+    // Weight is lit once it goes both ways, which is when its own "Allow" row goes away.
+    { key: 'weight', label: 'Weight', on: !!g?.writeWeight && !!g?.readWeight },
+    { key: 'activity', label: 'Activity', on: !!g?.readSteps || !!g?.readActiveCalories },
+  ];
+  if (!connected) return { line: 'Sync with Google Fit', items: items(null) };
+  if (!grants) return { line: 'Meals go to Google Fit', items: [] };
+  return { line: 'Syncing with Google Fit', items: items(grants) };
 }
 
 // ---------------------------------------------------------------- Settings: backup
@@ -440,41 +530,73 @@ export function backupProblemsText(problems: readonly string[]): string {
   return `${lines.join('\n')}\n\nNothing on this phone was changed.`;
 }
 
+/** The targets calculator's plan as figures, for the result card, with the sentence it stands for. */
+export interface GoalPlan {
+  /** The whole plan in words (`goalPlanText`). */
+  text: string;
+  /** The daily calories against what the profile burns, to 10 kcal: negative under, positive over, 0 for "what you burn". */
+  kcalVsBurn: number;
+  /** Grams of protein per kg of body weight. */
+  proteinPerKg: number;
+  /** About how many weeks the pace takes to the target weight, or null when there is none in the goal's direction. */
+  weeks: number | null;
+  /** The target weight those weeks lead to, or null. */
+  targetKg: number | null;
+  /** The calories are held at the lowest the app suggests. */
+  floored: boolean;
+}
+
 /**
  * What the goal picked in the targets calculator does, said under the goals: how far the calories sit
  * from what the profile burns, the protein that goes with it, and, when there is a target weight in
  * the goal's direction, about how many weeks the pace takes to reach it.
  */
 export function goalPlanText(p: Profile, targetKg: number | null): string {
+  return goalPlan(p, targetKg).text;
+}
+
+/** `goalPlanText`, with the figures it is made of, so the result card can draw them. */
+export function goalPlan(p: Profile, targetKg: number | null): GoalPlan {
   const burn = tdee(p);
   const raw = burn + goalAdjustment(p);
   const floored = raw < MIN_CALORIE_TARGET;
-  const change = Math.round(Math.abs(Math.max(MIN_CALORIE_TARGET, raw) - burn) / 10) * 10;
+  const signed = Math.max(MIN_CALORIE_TARGET, raw) - burn;
+  const change = Math.round(Math.abs(signed) / 10) * 10;
+  const plan = (text: string, weeks: number | null = null): GoalPlan => ({
+    text,
+    kcalVsBurn: p.goal === 'maintain' || change === 0 ? 0 : Math.sign(signed) * change,
+    proteinPerKg: proteinPerKg(p.goal),
+    weeks,
+    targetKg: weeks === null ? null : targetKg,
+    floored,
+  });
   const protein = `${proteinPerKg(p.goal)} g of protein per kg`;
+  // Under, unless the floor holds a small body's calories above what it burns.
+  const side = signed > 0 ? 'over' : 'under';
   let text: string;
   switch (p.goal) {
     case 'lose_fat':
-      text = `About ${formatKcal(change)} kcal a day under what you burn, with ${protein} so you keep muscle.`;
+      text = `About ${formatKcal(change)} kcal a day ${side} what you burn, with ${protein} so you keep muscle.`;
       break;
     case 'build_muscle':
       text = `About ${formatKcal(change)} kcal a day over what you burn, with ${protein}. Pair it with strength training.`;
       break;
     case 'recomp':
-      text = `About ${formatKcal(change)} kcal a day under what you burn, with ${protein}. It needs strength training 3 or more days a week.`;
+      text = `About ${formatKcal(change)} kcal a day ${side} what you burn, with ${protein}. It needs strength training 3 or more days a week.`;
       break;
     case 'maintain':
       text = `What you burn, with ${protein}.`;
       break;
   }
-  if (floored) return `${text} Held at ${formatKcal(MIN_CALORIE_TARGET)} kcal, the lowest this suggests.`;
+  if (floored) return plan(`${text} Held at ${formatKcal(MIN_CALORIE_TARGET)} kcal, the lowest this suggests.`);
   const rate = goalRateKg(p);
   if (targetKg !== null && isValidWeightKg(targetKg) && rate > 0 && isValidWeightKg(p.weightKg)) {
     const gap = targetKg - p.weightKg;
     const towards = p.goal === 'lose_fat' ? gap <= -0.05 : gap >= 0.05;
     if (towards) {
       const weeks = Math.max(1, Math.ceil(Math.abs(gap) / rate));
-      text += ` At this pace, ${formatKg(targetKg)} takes about ${weeks} ${weeks === 1 ? 'week' : 'weeks'}.`;
+      return plan(`${text} At this pace, ${formatKg(targetKg)} takes about ${weeks} ${weeks === 1 ? 'week' : 'weeks'}.`, weeks);
     }
   }
-  return text;
+  return plan(text);
 }

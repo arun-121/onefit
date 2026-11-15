@@ -3,8 +3,8 @@ import { useState } from 'react';
 import { Alert, StyleSheet, View } from 'react-native';
 
 import { FoodFields, MealPicker } from '@/components/item-editor';
-import { Sheet, SheetHeader } from '@/components/sheet-parts';
-import { AppText, Button, Group, GroupItem, GroupRow, Icon } from '@/components/ui';
+import { Note, Sheet, SheetHeader } from '@/components/sheet-parts';
+import { Button, Group, GroupItem, GroupRow, Icon } from '@/components/ui';
 import { Spacing } from '@/constants/theme';
 import { useLiveQuery } from '@/hooks/use-live-query';
 import { useTheme } from '@/hooks/use-theme';
@@ -84,7 +84,7 @@ function EntryForm({ entry }: { entry: Entry }) {
             icon={pinned ? 'star' : 'star-outline'}
             tone={pinned ? 'primary' : 'ring'}
             headline={pinned ? 'In your favourites' : 'Add to favourites'}
-            supporting={pinned ? 'Tap to take it off Today’s Log again row' : 'Log it again from Today in one tap'}
+            supporting={pinned ? 'On Today’s Log again row' : 'One tap to log it from Today'}
             trailing={
               <View importantForAccessibility="no-hide-descendants">
                 <Icon name={pinned ? 'check' : 'plus'} size={24} color={pinned ? colors.primary : undefined} />
@@ -94,9 +94,12 @@ function EntryForm({ entry }: { entry: Entry }) {
             accessibilityLabel={pinned ? 'Remove favourite' : 'Add to favourites'}
           />
         </Group>
-        <AppText variant="bodySmall" color={colors.onSurfaceVariant} textBreakStrategy="balanced" style={styles.helper}>
-          Your corrections are remembered, so next time you log this food the AI uses your numbers.
-        </AppText>
+        {/* One short line; what it means in full is what a screen reader hears. */}
+        <View accessible accessibilityLabel="Your corrections are remembered, so next time you log this food the AI uses your numbers.">
+          <Note icon="history" style={styles.helper}>
+            The AI reuses your numbers next time
+          </Note>
+        </View>
       </View>
 
       <Button title="Save changes" size="large" loading={saving} disabled={!draft.name.trim()} onPress={() => void save()} />

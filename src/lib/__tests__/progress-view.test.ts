@@ -6,6 +6,7 @@ import {
   type DayFoodTotal,
   type DaySummary,
   type InsightsInput,
+  type MaintenanceInfo,
   type PatternsInfo,
   type WeekBlock,
   type WeighIn,
@@ -13,6 +14,20 @@ import {
 import {
   averageVsGoalText,
   barsPath,
+  burnLine,
+  burnScale,
+  calorieDelta,
+  goalProgressText,
+  headlineView,
+  kcalScale,
+  mealsSpoken,
+  proteinDayMarks,
+  recalcLine,
+  targetsDelta,
+  weekAveragesLine,
+  weekSplitLine,
+  weightLine,
+  weightRateDelta,
   biggestMealText,
   budgetProgress,
   calendarHeight,
@@ -1124,6 +1139,8 @@ describe('week by week', () => {
       weight: '78.2 kg average, 3 weigh-ins',
       exercise: '3 workouts, 2 h 5 min',
       note: null,
+      weightFigure: '78.2 kg',
+      weightOnce: false,
       spoken: '24 to 30 Nov. Average 1,917 calories a day on 6 full days. 78.2 kg average, 3 weigh-ins. 3 workouts, 2 h 5 min.',
     });
   });
@@ -1137,6 +1154,8 @@ describe('week by week', () => {
       weight: '80.6 kg, one weigh-in',
       exercise: 'No workouts',
       note: 'Covers 4 days: your first log was part-way through.',
+      weightFigure: '80.6 kg',
+      weightOnce: true,
       spoken: '27 Oct to 2 Nov. Too few full days for an average. 80.6 kg, one weigh-in. No workouts. Covers 4 days: your first log was part-way through.',
     });
   });
@@ -1145,6 +1164,7 @@ describe('week by week', () => {
     const text = weekRowText({ ...block, weighIns: 0, averageKg: null, singleKg: null, workouts: 1, minutes: 45 }, TODAY);
     expect(text.weight).toBe('No weigh-ins');
     expect(text.exercise).toBe('1 workout, 45 min');
+    expect(text).toMatchObject({ weightFigure: null, weightOnce: false });
   });
 
   test('the rows the data layer builds for a month', () => {
@@ -1182,7 +1202,7 @@ describe('the glance tiles', () => {
     expect(text.streak).toMatchObject({ title: '1 day in a row', detail: 'Today is logged', waiting: false, action: null });
   });
 
-  test('a month in: each tile repeats its card’s answer', () => {
+  test('a month in: each tile repeats its card’s answer, and none repeats the headline', () => {
     // 1 to 29 November logged, 2,500 on the five Sundays: (5 x 2,500 + 24 x 1,800) / 29 = 1,921, 79 under 2,000.
     const month = Array.from({ length: 29 }, (_, i) => food(addDays(FROM_30, i), i % 7 === 0 ? 2500 : 1800));
     const weights: WeighIn[] = Array.from({ length: 30 }, (_, i) => ({ date: addDays(FROM_30, i), kg: 80 - (i * 2) / 29 }));
@@ -1201,7 +1221,12 @@ describe('the glance tiles', () => {
     const text = glanceText(insights);
     expect(text.weight).toMatchObject({ title: 'Losing 0.5 kg a week', detail: 'Latest 78.0 kg, today', waiting: false });
     expect(text.weight.title).toBe(on(on(insights.weight).rate).rateText);
-    expect(text.calories).toMatchObject({ title: '1,921 kcal a day', detail: '79 under your 2,000 kcal goal', waiting: false });
+    // The headline above already shows the average, so the tile gives the card's other answer: full days within budget.
+    // The five 2,500 kcal Sundays have no workout, so they are over; the 24 others are within.
+    expect(text.calories).toMatchObject({ title: '24 of 29', detail: 'Full days within budget', waiting: false });
+    expect(text.calories.title).toBe(`${on(insights.calories).withinBudgetDays} of ${on(insights.calories).completeDays}`);
+    expect(text.calories.spoken).toBe('Calories. 24 of 29. Full days within budget.');
+    expect(`${text.calories.title} ${text.calories.detail}`).not.toContain('1,921');
     expect(text.exercise).toMatchObject({ title: '2 workouts', detail: '1 h 15 min on 2 days', waiting: false });
     // Nothing logged today yet, so the run of 29 days is up to yesterday.
     expect(text.streak).toEqual({
@@ -1250,6 +1275,10 @@ describe('the list of days', () => {
       title: 'Yesterday',
       macros: '112 g protein, 210 g carbs, 60 g fat',
       extras: '45 min of exercise, weighed 78.4 kg',
+      grams: { protein: '112 g', carbs: '210 g', fat: '60 g' },
+      flag: null,
+      exercise: '45 min',
+      weight: '78.4 kg',
       spoken: 'Yesterday, 1,870 calories of a 2,131 budget, 112 g protein, 210 g carbs, 60 g fat, 45 min of exercise, weighed 78.4 kg. Opens the day.',
     });
   });
@@ -1264,13 +1293,15 @@ describe('the list of days', () => {
   test('an over-budget day says so in words, not only in colour', () => {
     const text = dayRowText({ ...full, calories: 2600, over: true, workouts: 0, exerciseMinutes: 0, weightKg: null }, TODAY);
     expect(text.extras).toBe('Over budget');
+    expect(text.flag).toBe('Over budget');
     expect(text.spoken).toContain(', over budget. Opens the day.');
   });
 
   test('a past day with too little logged is flagged, today is not', () => {
     const thin = { ...full, calories: 300, complete: false, workouts: 0, exerciseMinutes: 0, weightKg: null };
     expect(dayRowText(thin, TODAY).extras).toBe('Too little logged for the averages');
-    expect(dayRowText({ ...thin, date: TODAY }, TODAY)).toMatchObject({ title: 'Today', extras: null });
+    expect(dayRowText(thin, TODAY).flag).toBe('Not a full day');
+    expect(dayRowText({ ...thin, date: TODAY }, TODAY)).toMatchObject({ title: 'Today', extras: null, flag: null });
   });
 
   test('a day with only a workout or only a weigh-in', () => {
@@ -1279,8 +1310,183 @@ describe('the list of days', () => {
       title: 'Yesterday',
       macros: null,
       extras: 'No food logged, 2 workouts',
+      grams: null,
+      flag: 'No food logged',
+      exercise: '2 workouts',
+      weight: null,
       spoken: 'Yesterday, no food logged, 2 workouts. Opens the day.',
     });
     expect(dayRowText({ ...empty, workouts: 0, exerciseMinutes: 0 }, TODAY).extras).toBe('No food logged, weighed 78.4 kg');
+  });
+});
+
+describe('pictures in place of sentences', () => {
+  const clearRate = {
+    ready: true as const,
+    kgPerWeek: -0.46,
+    seKgPerWeek: 0.05,
+    clear: true,
+    steady: false,
+    nowKg: 74.2,
+    changeKg: -1.94,
+    days: 30,
+    weighIns: 24,
+    fromDate: '2026-10-13',
+    toDate: TODAY,
+    direction: 'down' as const,
+    towardGoal: true,
+    changeText: 'Down 1.9 kg in 30 days',
+    rateText: 'Losing 0.5 kg a week',
+  };
+
+  test('an average against the goal as a chip: under is within budget, so it is the filled one', () => {
+    expect(calorieDelta(-61, 2000)).toEqual({ direction: 'down', amount: '61 under', towardGoal: true, spoken: '61 under your 2,000 kcal goal' });
+    expect(calorieDelta(1250.4, 2000)).toEqual({ direction: 'up', amount: '1,250 over', towardGoal: false, spoken: '1,250 over your 2,000 kcal goal' });
+    expect(calorieDelta(0.3, 2000)).toEqual({ direction: 'flat', amount: 'On goal', towardGoal: true, spoken: 'Right on your 2,000 kcal goal' });
+    expect(calorieDelta(Number.NaN, Number.NaN).direction).toBe('flat');
+  });
+
+  test('the weight rate gets an arrow only when it is clear, and a level chip when it is steady', () => {
+    expect(weightRateDelta(clearRate)).toEqual({
+      direction: 'down',
+      amount: '0.5 kg a week',
+      towardGoal: true,
+      spoken: 'Losing 0.5 kg a week. Down 1.9 kg in 30 days. Toward your target.',
+    });
+    expect(weightRateDelta({ ...clearRate, towardGoal: null })?.towardGoal).toBe(false);
+    expect(weightRateDelta({ ...clearRate, clear: false, steady: true, direction: 'flat', towardGoal: null, rateText: 'Holding steady', changeText: 'Steady over 30 days' })).toEqual({
+      direction: 'flat',
+      amount: 'Steady',
+      towardGoal: false,
+      spoken: 'Holding steady. Steady over 30 days.',
+    });
+    // Neither clear nor steady: no chip, no arrow (PRODUCT.md).
+    expect(weightRateDelta({ ...clearRate, clear: false, steady: false, direction: null, towardGoal: null })).toBeNull();
+    expect(weightRateDelta({ ready: false, reason: 'x' })).toBeNull();
+  });
+
+  test('goal progress in words, with and without a starting weight', () => {
+    expect(goalProgressText({ kg: 72, startKg: 82.4, toGoKg: 2.2, progress: 0.79, reached: false })).toBe(
+      '79% of the way from 82.4 kg to 72.0 kg, with 2.2 kg to go.',
+    );
+    expect(goalProgressText({ kg: 72, startKg: null, toGoKg: 2.2, progress: null, reached: false })).toBe('2.2 kg to go to your 72.0 kg target.');
+  });
+
+  test('the weekly averages and the targets suggestion in short lines', () => {
+    expect(weekAveragesLine({ thisWeek: { average: 74.4, weighIns: 6 }, changeKg: -0.4 })).toBe('74.4 kg average this week, 0.4 kg lower than the week before');
+    expect(weekAveragesLine({ thisWeek: { average: 74.4, weighIns: 6 }, changeKg: 0.6 })).toBe('74.4 kg average this week, 0.6 kg higher than the week before');
+    expect(weekAveragesLine({ thisWeek: { average: 74.4, weighIns: 6 }, changeKg: 0.01 })).toBe('74.4 kg average this week, the same as the week before');
+    expect(recalcLine({ fromKg: 80, changeKg: -5.8 })).toBe('5.8 kg from the 80.0 kg they were set at');
+    expect(targetsDelta({ calorieChange: -220 })).toEqual({ direction: 'down', amount: '220 less', towardGoal: false, spoken: '220 kcal less a day than now' });
+    expect(targetsDelta({ calorieChange: 0.2 })).toBeNull();
+  });
+
+  test('the line under the weight figure', () => {
+    const base = { latest: { date: TODAY, kg: 80.5 }, first: { date: nov(20), kg: 80.2 }, rawChangeKg: 0.3, weekAverages: null };
+    // Before there is a rate: the plain change between two readings.
+    expect(weightLine({ ...base, rate: { ready: false, reason: 'x', action: 'log-weight' } }, TODAY)).toBe('Up 0.3 kg since 20 Nov (80.2 kg)');
+    // A week is too short: nothing, the next step says why.
+    expect(weightLine({ ...base, rate: { ready: false, reason: 'x', action: 'longer-period' } }, TODAY)).toBeNull();
+    // A rate that is there but not clear says so in its own words; a clear one leaves it to the chip.
+    expect(weightLine({ ...base, rate: { ...clearRate, clear: false, direction: null, rateText: 'No clear direction yet' } }, TODAY)).toBe('No clear direction yet');
+    expect(weightLine({ ...base, rate: clearRate }, TODAY)).toBeNull();
+    const weekAverages = { thisWeek: { average: 80.4, weighIns: 3 }, lastWeek: { average: 81, weighIns: 2 }, changeKg: -0.6, text: 'x' };
+    expect(weightLine({ ...base, rate: { ready: false, reason: 'x', action: 'longer-period' }, weekAverages }, TODAY)).toBe(
+      '80.4 kg average this week, 0.6 kg lower than the week before',
+    );
+  });
+
+  test('the headline as figures leads with what its sentence leads with', () => {
+    const month = Array.from({ length: 29 }, (_, i) => food(addDays(FROM_30, i), 1900));
+    const falling: WeighIn[] = Array.from({ length: 30 }, (_, i) => ({ date: addDays(FROM_30, i), kg: 80 - (i * 2) / 29 }));
+    const both = buildInsights(input({ dayTotals: month, loggedDates: month.map((d) => d.date), weights: falling }));
+    expect(on(both.headline).text).toBe('Down 2.0 kg in 30 days, eating 1,900 kcal a day on average.');
+    expect(headlineView(both)).toEqual({
+      figure: { value: '−2.0 kg', unit: 'in 30 days', delta: null },
+      second: { value: '1,900', unit: 'kcal a day', delta: { direction: 'down', amount: '100 under', towardGoal: true, spoken: '100 under your 2,000 kcal goal' } },
+      line: null,
+      meter: null,
+    });
+
+    // No weigh-ins: the average is the figure.
+    const eating = buildInsights(input({ dayTotals: month, loggedDates: month.map((d) => d.date) }));
+    expect(headlineView(eating)).toMatchObject({ figure: { value: '1,900', unit: 'kcal a day' }, second: null, line: null });
+
+    // A patchy month leads with how few days the average stands on.
+    const patchy = month.filter((_, i) => i % 3 === 0);
+    const low = buildInsights(input({ dayTotals: patchy, loggedDates: patchy.map((d) => d.date) }));
+    expect(on(low.headline).text).toMatch(/^Meals fully logged on 10 of/);
+    expect(headlineView(low)).toMatchObject({ figure: { value: `10 of ${on(low.calories).countedDays}`, unit: 'days logged in full' }, line: '1,900 kcal a day on those days' });
+
+    // Two full days: a meter, not a figure.
+    const two = buildInsights(input({ dayTotals: month.slice(-2), loggedDates: month.slice(-2).map((d) => d.date) }));
+    expect(headlineView(two)).toEqual({ figure: null, second: null, line: null, meter: { label: 'Full days for an average', have: 2, need: 3 } });
+
+    // Only weigh-ins, too few for a rate: the latest one.
+    const weighed = buildInsights(input({ weights: [{ date: TODAY, kg: 80.04 }] }));
+    expect(headlineView(weighed)).toMatchObject({ figure: { value: '80.0', unit: 'kg' }, line: 'Your latest weigh-in' });
+
+    // Only workouts.
+    const moved = buildInsights(input({ exercises: [{ date: TODAY, activity: 'run', minutes: 40, calories: 400 }] }));
+    expect(headlineView(moved)).toMatchObject({ figure: { value: '40 min', unit: 'of exercise' } });
+  });
+
+  test('the burn range bar: a scale that holds every mark, and a line that repeats none of them', () => {
+    const m = {
+      low: 2350,
+      high: 2550,
+      averageIntake: 1939,
+      formulaKcal: 2330,
+      goal: { kcal: 2000, kind: 'deficit' as const, gapKcal: { min: 350, max: 550 }, gapKgPerWeek: { min: 0.3, max: 0.5 }, text: 'x' },
+    } satisfies Partial<MaintenanceInfo>;
+    expect(burnScale(m)).toEqual({ min: 1800, max: 2700 });
+    expect(burnScale({ ...m, formulaKcal: null })).toEqual({ min: 1800, max: 2700 });
+    expect(kcalScale([])).toEqual({ min: 0, max: 1 });
+    expect(kcalScale([2000, 2000])).toEqual({ min: 1900, max: 2100 });
+    expect(burnLine(m)).toBe('About 0.3 to 0.5 kg lost a week at your goal');
+    expect(burnLine({ goal: { ...m.goal, gapKgPerWeek: { min: 0.4, max: 0.4 } } })).toBe('About 0.4 kg lost a week at your goal');
+    expect(burnLine({ goal: { ...m.goal, gapKgPerWeek: { min: 0, max: 0.2 } } })).toBe('Up to 0.2 kg lost a week at your goal');
+    expect(burnLine({ goal: { ...m.goal, kind: 'surplus', gapKcal: { min: 20, max: 60 }, gapKgPerWeek: { min: 0, max: 0.05 } } })).toBe(
+      'Your goal is 20 to 60 kcal more than you burn',
+    );
+    expect(burnLine({ goal: { ...m.goal, kind: 'maintenance', gapKcal: null, gapKgPerWeek: null } })).toBe('Your goal is close to what you burn');
+  });
+
+  test('protein days as dots: the hits are the Macros card count', () => {
+    // 24 to 30 Nov: full days with 100 g (the goal), 85 g (under 90%), nothing, a thin day, and today.
+    const period = { chartFrom: nov(24), chartDays: 7, to: TODAY };
+    const days = [
+      { date: nov(24), complete: true, protein: 100 },
+      { date: nov(25), complete: true, protein: 85 },
+      { date: nov(26), complete: true, protein: 90 },
+      { date: nov(28), complete: false, protein: 10 },
+      { date: TODAY, complete: false, protein: 40 },
+    ];
+    expect(proteinDayMarks(days, period, 100)).toEqual({
+      marks: ['hit', 'miss', 'hit', 'empty', 'empty', 'empty', 'today'],
+      labels: ['T', 'W', 'T', 'F', 'S', 'S', 'M'],
+      hits: 2,
+      full: 3,
+    });
+    // No protein goal: nothing is a hit.
+    expect(proteinDayMarks(days, period, 0).hits).toBe(0);
+    // A month has no labels.
+    expect(proteinDayMarks(days, { chartFrom: FROM_30, chartDays: 30, to: TODAY }, 100).labels).toBeNull();
+
+    const month = Array.from({ length: 29 }, (_, i) => ({ ...food(addDays(FROM_30, i), 1900), protein: i % 3 === 0 ? 60 : 100 }));
+    const r = buildInsights(input({ dayTotals: month, loggedDates: month.map((d) => d.date) }));
+    const dots = proteinDayMarks(on(r.everyDay).days, r.period, on(r.macros).protein.goal);
+    expect(dots.hits).toBe(on(r.macros).proteinDays);
+    expect(dots.full).toBe(on(r.macros).days);
+  });
+
+  test('weekdays against weekends, and the meals, in words', () => {
+    expect(weekSplitLine({ difference: 550, clear: true })).toBe('550 kcal more a day at weekends');
+    expect(weekSplitLine({ difference: -200, clear: true })).toBe('200 kcal less a day at weekends');
+    expect(weekSplitLine({ difference: 60, clear: false })).toBe('About the same so far');
+    expect(weekSplitLine({ difference: 300, clear: false })).toBe('Too few days to tell them apart yet');
+    expect(mealsSpoken([{ label: 'Breakfast', average: 453, share: 0.23 }, { label: 'Snacks', average: 160, share: 0.08 }])).toBe(
+      'Calories by meal: Breakfast, 23%, 453 kcal a day; Snacks, 8%, 160 kcal a day.',
+    );
   });
 });

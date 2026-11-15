@@ -124,18 +124,38 @@ export type InsightAction =
   /** The figure needs a longer period than the one selected: switch the Progress tab to 30 days. */
   | 'longer-period';
 
+/**
+ * How far along a figure that is not ready yet is, when what it waits for is a count: what there is
+ * against what it needs ("Weigh-ins", 2 of 4). It says nothing `reason` does not; it is there so the
+ * count can be drawn as a meter.
+ */
+export interface NotReadyProgress {
+  /** What is counted, in a word or two: "Weigh-ins", "Full days". */
+  label: string;
+  have: number;
+  need: number;
+}
+
 export interface NotReady {
   ready: false;
   /** Why the figure is missing, as a sentence to show the owner. */
   reason: string;
   /** The one step that unlocks it, when there is one: something to log, or a longer period to look at. */
   action?: InsightAction;
+  /** Set when the reason is a count short of a threshold. */
+  progress?: NotReadyProgress;
 }
 
 /** A card, or one figure on a card: either the data, or the reason it is not there yet. */
 export type Card<T> = ({ ready: true } & T) | NotReady;
 
-const notReady = (reason: string, action?: InsightAction): NotReady => (action ? { ready: false, reason, action } : { ready: false, reason });
+const notReady = (reason: string, action?: InsightAction, progress?: NotReadyProgress): NotReady => ({
+  ready: false,
+  reason,
+  ...(action ? { action } : {}),
+  ...(progress ? { progress } : {}),
+});
+const progressOf = (label: string, have: number, need: number): NotReadyProgress => ({ label, have, need });
 
 // ---------------------------------------------------------------- input
 
@@ -901,7 +921,11 @@ const HOW_FAST = 'how fast your weight is changing';
 function fitRate(weighIns: readonly WeighIn[]): RateResult {
   const n = weighIns.length;
   if (n === 0) {
-    return notReady(`Log your weight on ${RATE_MIN_WEIGH_INS} days over at least a week to see how fast it is changing.`, 'log-weight');
+    return notReady(
+      `Log your weight on ${RATE_MIN_WEIGH_INS} days over at least a week to see how fast it is changing.`,
+      'log-weight',
+      progressOf('Weigh-ins', 0, RATE_MIN_WEIGH_INS),
+    );
   }
   const first = weighIns[0];
   const last = weighIns[n - 1];
@@ -911,12 +935,14 @@ function fitRate(weighIns: readonly WeighIn[]): RateResult {
     return notReady(
       `Log ${plural(more, 'more weigh-in')} to see ${HOW_FAST}. That takes ${RATE_MIN_WEIGH_INS} weigh-ins over at least a week.`,
       'log-weight',
+      progressOf('Weigh-ins', n, RATE_MIN_WEIGH_INS),
     );
   }
   if (between + 1 < RATE_MIN_SPAN_DAYS) {
     return notReady(
       `Your weigh-ins cover ${plural(between + 1, 'day')}. Keep weighing in until they cover a week to see ${HOW_FAST}.`,
       'log-weight',
+      progressOf('Days covered', between + 1, RATE_MIN_SPAN_DAYS),
     );
   }
   const fit = linearFit(weighIns.map((w) => ({ x: daysBetween(first.date, w.date), y: w.kg })));
@@ -1212,15 +1238,20 @@ function tooFewFullDays(logged: readonly Day[], goal: number, shows: string): No
   const full = logged.filter((d) => d.complete).length;
   const today = logged.find((d) => d.isToday);
   if (full > 0) {
-    return notReady(`${plural(full, 'full day')} logged so far${today ? ', not counting today' : ''}. ${shows} after ${AVERAGE_MIN_DAYS}.`, 'log-food');
+    return notReady(
+      `${plural(full, 'full day')} logged so far${today ? ', not counting today' : ''}. ${shows} after ${AVERAGE_MIN_DAYS}.`,
+      'log-food',
+      progressOf('Full days', full, AVERAGE_MIN_DAYS),
+    );
   }
+  const none = progressOf('Full days', 0, AVERAGE_MIN_DAYS);
   const after = `${shows} after ${AVERAGE_MIN_DAYS} full days.`;
   // An evening with the day's meals in: nothing is missing, the day is just not over.
-  if (today?.enough) return notReady(`Today counts once the day is over. ${after}`);
+  if (today?.enough) return notReady(`Today counts once the day is over. ${after}`, undefined, none);
   const fullDay = `A full day has at least ${formatKcal(completeDayThreshold(goal))} kcal logged`;
   // Nothing before today: say what a full day is without calling a first morning short.
-  if (today && logged.length === 1) return notReady(`${after} ${fullDay}, and today counts once it is over.`, 'log-food');
-  return notReady(`No day has enough logged yet. ${fullDay}. ${after}`, 'log-food');
+  if (today && logged.length === 1) return notReady(`${after} ${fullDay}, and today counts once it is over.`, 'log-food', none);
+  return notReady(`No day has enough logged yet. ${fullDay}. ${after}`, 'log-food', none);
 }
 
 // ---------------------------------------------------------------- weight card
@@ -1537,6 +1568,7 @@ function buildMaintenance(input: InsightsInput, days: readonly Day[], weighIns: 
     return notReady(
       `Log ${plural(more, 'more weigh-in')} to estimate what you burn. That takes ${MAINTENANCE_MIN_WEIGH_INS} weigh-ins over at least 2 weeks, with your meals logged in between.`,
       'log-weight',
+      progressOf('Weigh-ins', n, MAINTENANCE_MIN_WEIGH_INS),
     );
   }
   const first = weighIns[0];
@@ -1546,6 +1578,7 @@ function buildMaintenance(input: InsightsInput, days: readonly Day[], weighIns: 
     return notReady(
       `Your weigh-ins are ${plural(between, 'day')} apart. Keep weighing in until the first and the last are at least 14 days apart.`,
       'log-weight',
+      between < MAINTENANCE_MIN_DAYS_BETWEEN ? progressOf('Days apart', between, MAINTENANCE_MIN_DAYS_BETWEEN) : undefined,
     );
   }
   // Today is not over, so it cannot be a full day yet: with a weigh-in this morning it is left
@@ -1557,6 +1590,7 @@ function buildMaintenance(input: InsightsInput, days: readonly Day[], weighIns: 
     return notReady(
       `Meals were fully logged on ${complete.length} of the ${window.length} days between your weigh-ins. This needs at least ${needed}.`,
       'log-food',
+      progressOf('Full days', complete.length, needed),
     );
   }
   const intake = mean(complete.map((d) => d.calories));
@@ -1780,6 +1814,7 @@ function buildPatterns(input: InsightsInput, days: readonly Day[], from: string)
         ? `Log ${PATTERNS_MIN_DAYS} full days of meals to see your patterns.`
         : `Log ${plural(PATTERNS_MIN_DAYS - complete.length, 'more full day')} of meals to see your patterns. You have ${complete.length} so far.`,
       'log-food',
+      progressOf('Full days', complete.length, PATTERNS_MIN_DAYS),
     );
   }
   const overall = mean(complete.map((d) => d.calories));
@@ -1799,6 +1834,10 @@ function buildPatterns(input: InsightsInput, days: readonly Day[], from: string)
     weekSplit = notReady(
       `Comparing weekdays with weekends needs ${WEEK_SPLIT_MIN_DAYS} full days of each. So far you have ${plural(weekdays.length, 'weekday')} and ${plural(weekends.length, 'weekend day')}.`,
       'log-food',
+      // The one further from its 3; weekends, with two a week, nearly always.
+      weekends.length < WEEK_SPLIT_MIN_DAYS && weekends.length <= weekdays.length
+        ? progressOf('Weekend days', weekends.length, WEEK_SPLIT_MIN_DAYS)
+        : progressOf('Weekdays', weekdays.length, WEEK_SPLIT_MIN_DAYS),
     );
   } else {
     const wd = Math.round(mean(weekdays.map((d) => d.calories)));
@@ -1844,9 +1883,17 @@ function buildPatterns(input: InsightsInput, days: readonly Day[], from: string)
   if (tooShort) {
     highestDay = notReady('One week is too short to pick out a day of the week.', 'longer-period');
   } else if (complete.length < HIGHEST_DAY_MIN_DAYS) {
-    highestDay = notReady(`Your highest day of the week shows after ${HIGHEST_DAY_MIN_DAYS} full days. You have ${complete.length} so far.`, 'log-food');
+    highestDay = notReady(
+      `Your highest day of the week shows after ${HIGHEST_DAY_MIN_DAYS} full days. You have ${complete.length} so far.`,
+      'log-food',
+      progressOf('Full days', complete.length, HIGHEST_DAY_MIN_DAYS),
+    );
   } else if (eligible.length < 2) {
-    highestDay = notReady(`Your highest day of the week shows once two weekdays have ${WEEKDAY_MIN_DAYS} full days each.`, 'log-food');
+    highestDay = notReady(
+      `Your highest day of the week shows once two weekdays have ${WEEKDAY_MIN_DAYS} full days each.`,
+      'log-food',
+      progressOf(`Weekdays with ${WEEKDAY_MIN_DAYS} full days`, eligible.length, 2),
+    );
   } else {
     const top = eligible.reduce((best, w) => (w.average > best.average ? w : best));
     const above = Math.round(top.average - overall);
@@ -2095,7 +2142,7 @@ export function buildInsights(input: InsightsInput): Insights {
   // There is one weigh-in a day. Once today has its own, "Log weight" could only reopen it, so the
   // reasons that ask for weigh-ins drop the button and say when the next one can be made.
   const afterToday = <T>(card: Card<T>): Card<T> =>
-    !card.ready && card.action === 'log-weight' && weighedToday ? notReady(`${card.reason} Weigh in again tomorrow.`) : card;
+    !card.ready && card.action === 'log-weight' && weighedToday ? notReady(`${card.reason} Weigh in again tomorrow.`, undefined, card.progress) : card;
   const builtWeight = buildWeight(input, from, allWeighIns, fits);
   const weight: WeightCard = builtWeight.ready ? { ...builtWeight, rate: afterToday(builtWeight.rate) } : afterToday(builtWeight);
   const lastLogged = allLogged.length ? allLogged.reduce((a, b) => (a > b ? a : b)) : null;

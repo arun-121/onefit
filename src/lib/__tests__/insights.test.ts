@@ -228,12 +228,18 @@ describe('weight rate', () => {
 
   it('needs three weigh-ins', () => {
     const none = weightRate([]);
-    expect(none).toEqual({ ready: false, reason: 'Log your weight on 3 days over at least a week to see how fast it is changing.', action: 'log-weight' });
+    expect(none).toEqual({
+      ready: false,
+      reason: 'Log your weight on 3 days over at least a week to see how fast it is changing.',
+      action: 'log-weight',
+      progress: { label: 'Weigh-ins', have: 0, need: 3 },
+    });
     const two = weightRate([{ date: '2026-11-01', kg: 80 }, { date: '2026-11-20', kg: 79 }]);
     expect(two).toEqual({
       ready: false,
       reason: 'Log 1 more weigh-in to see how fast your weight is changing. That takes 3 weigh-ins over at least a week.',
       action: 'log-weight',
+      progress: { label: 'Weigh-ins', have: 2, need: 3 },
     });
     const one = weightRate([{ date: '2026-11-01', kg: 80 }]);
     expect(off(one).reason).toContain('Log 2 more weigh-ins to see how fast your weight is changing.');
@@ -249,6 +255,7 @@ describe('weight rate', () => {
       ready: false,
       reason: 'Your weigh-ins cover 6 days. Keep weighing in until they cover a week to see how fast your weight is changing.',
       action: 'log-weight',
+      progress: { label: 'Days covered', have: 6, need: 7 },
     });
   });
 
@@ -391,15 +398,25 @@ describe('a single logged day, today', () => {
     });
     const calories = on(r.calories);
     // One day is not an average, and on its own evening nothing is missing: no step is offered.
-    expect(calories.average).toEqual({ ready: false, reason: 'Today counts once the day is over. An average shows after 3 full days.' });
+    expect(calories.average).toEqual({
+      ready: false,
+      reason: 'Today counts once the day is over. An average shows after 3 full days.',
+      progress: { label: 'Full days', have: 0, need: 3 },
+    });
     expect(calories.bars).toHaveLength(7);
     expect(calories.bars.slice(0, 6).every((b) => b.calories === null && b.status === 'before')).toBe(true);
     expect(calories.bars[6]).toEqual({ date: TODAY, dayIndex: 6, calories: 2100, budget: 2000, status: 'over', complete: false, isToday: true });
     expect(r.macros).toEqual({
       ready: false,
       reason: 'Today counts once the day is over. Your protein, carbs and fat averages show after 3 full days.',
+      progress: { label: 'Full days', have: 0, need: 3 },
     });
-    expect(r.patterns).toEqual({ ready: false, reason: 'Log 5 full days of meals to see your patterns.', action: 'log-food' });
+    expect(r.patterns).toEqual({
+      ready: false,
+      reason: 'Log 5 full days of meals to see your patterns.',
+      action: 'log-food',
+      progress: { label: 'Full days', have: 0, need: 5 },
+    });
     expect(r.maintenance.ready).toBe(false);
     expect(r.weight.ready).toBe(false);
     expect(r.weeks).toEqual([]);
@@ -480,6 +497,7 @@ describe('calories', () => {
       ready: false,
       reason: 'No day has enough logged yet. A full day has at least 1,000 kcal logged. An average shows after 3 full days.',
       action: 'log-food',
+      progress: { label: 'Full days', have: 0, need: 3 },
     });
     expect(high.headline).toEqual({ ready: true, text: 'Meals logged on 1 day. An average shows after 3 full days.', tone: 'neutral' });
   });
@@ -952,6 +970,7 @@ describe('the 7-day view', () => {
       ready: false,
       reason: 'Log 2 more weigh-ins to see how fast your weight is changing. That takes 3 weigh-ins over at least a week.',
       action: 'log-weight',
+      progress: { label: 'Weigh-ins', have: 1, need: 3 },
     });
     expect(r.weight.projection).toEqual({
       kind: 'no-rate',
@@ -1036,12 +1055,14 @@ describe('once today has its weigh-in', () => {
       ready: false,
       reason: 'Log 2 more weigh-ins to see how fast your weight is changing. That takes 3 weigh-ins over at least a week.',
       action: 'log-weight',
+      progress: { label: 'Weigh-ins', have: 1, need: 3 },
     });
     const after = buildInsights(input({ weights: [{ date: TODAY, kg: 80 }] }));
     expect(after.weight.ready).toBe(true);
     expect(on(after.weight).rate).toEqual({
       ready: false,
       reason: 'Log 2 more weigh-ins to see how fast your weight is changing. That takes 3 weigh-ins over at least a week. Weigh in again tomorrow.',
+      progress: { label: 'Weigh-ins', have: 1, need: 3 },
     });
     // The same in the 7-day view, where the reason comes from the last 30 days.
     const week = buildInsights(input({ days: 7, weights: [{ date: TODAY, kg: 80 }] }));
@@ -1054,18 +1075,21 @@ describe('once today has its weigh-in', () => {
       ready: false,
       reason: 'Log 3 more weigh-ins to estimate what you burn. That takes 4 weigh-ins over at least 2 weeks, with your meals logged in between.',
       action: 'log-weight',
+      progress: { label: 'Weigh-ins', have: 1, need: 4 },
     });
     const after = buildInsights(input({ ...eaten, weights: [{ date: TODAY, kg: 80 }] }));
     expect(after.maintenance).toEqual({
       ready: false,
       reason:
         'Log 3 more weigh-ins to estimate what you burn. That takes 4 weigh-ins over at least 2 weeks, with your meals logged in between. Weigh in again tomorrow.',
+        progress: { label: 'Weigh-ins', have: 1, need: 4 },
     });
     // Four weigh-ins that end today but are only 9 days apart.
     const tight = [9, 6, 3, 0].map((ago, i) => ({ date: addDays(TODAY, -ago), kg: 80 - 0.1 * i }));
     expect(buildInsights(input({ ...eaten, weights: tight })).maintenance).toEqual({
       ready: false,
       reason: 'Your weigh-ins are 9 days apart. Keep weighing in until the first and the last are at least 14 days apart. Weigh in again tomorrow.',
+      progress: { label: 'Days apart', have: 9, need: 14 },
     });
   });
 
@@ -1319,6 +1343,7 @@ describe('what you actually burn', () => {
       ready: false,
       reason: 'Meals were fully logged on 13 of the 22 days between your weigh-ins. This needs at least 14.',
       action: 'log-food',
+      progress: { label: 'Full days', have: 13, need: 14 },
     });
   });
 
@@ -1582,6 +1607,7 @@ describe('patterns', () => {
       ready: false,
       reason: 'Comparing weekdays with weekends needs 3 full days of each. So far you have 10 weekdays and 2 weekend days.',
       action: 'log-food',
+      progress: { label: 'Weekend days', have: 2, need: 3 },
     });
     // Saturday 14 November is the third weekend day.
     expect(patternsOf(fourWeeks.slice(0, 13)).weekSplit).toMatchObject({ ready: true, weekday: { days: 10 }, weekend: { days: 3 } });
@@ -1712,6 +1738,7 @@ describe('patterns', () => {
       ready: false,
       reason: 'Log 1 more full day of meals to see your patterns. You have 4 so far.',
       action: 'log-food',
+      progress: { label: 'Full days', have: 4, need: 5 },
     });
     expect(patternsOf(fourWeeks.slice(0, 5)).days).toBe(5);
   });
@@ -1721,12 +1748,14 @@ describe('patterns', () => {
       ready: false,
       reason: 'Your highest day of the week shows after 14 full days. You have 10 so far.',
       action: 'log-food',
+      progress: { label: 'Full days', have: 10, need: 14 },
     });
     // Two whole weeks: 14 full days, but only two of each weekday.
     expect(patternsOf(fourWeeks.slice(0, 14)).highestDay).toEqual({
       ready: false,
       reason: 'Your highest day of the week shows once two weekdays have 3 full days each.',
       action: 'log-food',
+      progress: { label: 'Weekdays with 3 full days', have: 0, need: 2 },
     });
     // Monday 16 November is the third Monday: one weekday is not enough to compare.
     expect(patternsOf(fourWeeks.slice(0, 15)).highestDay.ready).toBe(false);
@@ -1838,10 +1867,15 @@ describe('full days and averages', () => {
     });
     expect(r.calories).toMatchObject({ ready: true, loggedDays: 1, countedDays: 1, completeDays: 0, withinBudgetDays: 0, todayPending: true });
     // Nothing is missing, the day is just not over: no step is offered.
-    expect(on(r.calories).average).toEqual({ ready: false, reason: 'Today counts once the day is over. An average shows after 3 full days.' });
+    expect(on(r.calories).average).toEqual({
+      ready: false,
+      reason: 'Today counts once the day is over. An average shows after 3 full days.',
+      progress: { label: 'Full days', have: 0, need: 3 },
+    });
     expect(r.macros).toEqual({
       ready: false,
       reason: 'Today counts once the day is over. Your protein, carbs and fat averages show after 3 full days.',
+      progress: { label: 'Full days', have: 0, need: 3 },
     });
     expect(r.headline).toEqual({ ready: true, text: 'Your first day is logged. An average shows after 3 full days.', tone: 'neutral' });
     expect(on(r.exercise)).toMatchObject({ workouts: 1, minutes: 30, perWeek: null });
@@ -1854,11 +1888,13 @@ describe('full days and averages', () => {
       ready: false,
       reason: 'An average shows after 3 full days. A full day has at least 800 kcal logged, and today counts once it is over.',
       action: 'log-food',
+      progress: { label: 'Full days', have: 0, need: 3 },
     });
     expect(r.macros).toEqual({
       ready: false,
       reason: 'Your protein, carbs and fat averages show after 3 full days. A full day has at least 800 kcal logged, and today counts once it is over.',
       action: 'log-food',
+      progress: { label: 'Full days', have: 0, need: 3 },
     });
     expect(on(r.headline).text).toBe('Your first day is logged. An average shows after 3 full days.');
   });
@@ -1867,11 +1903,17 @@ describe('full days and averages', () => {
     // Day two, before breakfast: yesterday's 1,950 is one day, not an average.
     const morning = insightsOf(before(1950));
     expect(morning.calories).toMatchObject({ ready: true, completeDays: 1, countedDays: 1, averageBudget: null, budgetText: null });
-    expect(on(morning.calories).average).toEqual({ ready: false, reason: '1 full day logged so far. An average shows after 3.', action: 'log-food' });
+    expect(on(morning.calories).average).toEqual({
+      ready: false,
+      reason: '1 full day logged so far. An average shows after 3.',
+      action: 'log-food',
+      progress: { label: 'Full days', have: 1, need: 3 },
+    });
     expect(morning.macros).toEqual({
       ready: false,
       reason: '1 full day logged so far. Your protein, carbs and fat averages show after 3.',
       action: 'log-food',
+      progress: { label: 'Full days', have: 1, need: 3 },
     });
     expect(on(morning.headline).text).toBe('Your first day is logged. An average shows after 3 full days.');
 
@@ -1886,7 +1928,12 @@ describe('full days and averages', () => {
   it('shows no average from two full days', () => {
     const r = insightsOf(before(1900, 2100));
     expect(r.calories).toMatchObject({ ready: true, completeDays: 2, averageBudget: null, lowCoverage: false });
-    expect(on(r.calories).average).toEqual({ ready: false, reason: '2 full days logged so far. An average shows after 3.', action: 'log-food' });
+    expect(on(r.calories).average).toEqual({
+      ready: false,
+      reason: '2 full days logged so far. An average shows after 3.',
+      action: 'log-food',
+      progress: { label: 'Full days', have: 2, need: 3 },
+    });
     expect(r.macros).toMatchObject({ ready: false, action: 'log-food' });
     expect(r.headline).toEqual({ ready: true, text: '2 full days of meals logged so far. An average shows after 3.', tone: 'neutral' });
   });
@@ -1931,7 +1978,11 @@ describe('full days and averages', () => {
   it('does not blame the owner while today is the only day with enough on it', () => {
     // Yesterday was a coffee; today has 1,200 kcal so far.
     const r = insightsOf([...before(300), food(TODAY, 1200)]);
-    expect(on(r.calories).average).toEqual({ ready: false, reason: 'Today counts once the day is over. An average shows after 3 full days.' });
+    expect(on(r.calories).average).toEqual({
+      ready: false,
+      reason: 'Today counts once the day is over. An average shows after 3 full days.',
+      progress: { label: 'Full days', have: 0, need: 3 },
+    });
     expect(r.calories).toMatchObject({ completeDays: 0, leftOutDays: 1 });
     expect(on(r.headline).text).toBe('Meals logged on 2 days. An average shows after 3 full days.');
     // Neither day has enough: then it says what a full day is.
@@ -1940,6 +1991,7 @@ describe('full days and averages', () => {
       ready: false,
       reason: 'No day has enough logged yet. A full day has at least 800 kcal logged. An average shows after 3 full days.',
       action: 'log-food',
+      progress: { label: 'Full days', have: 0, need: 3 },
     });
   });
 
@@ -1964,6 +2016,7 @@ describe('full days and averages', () => {
       ready: false,
       reason: 'Meals were fully logged on 12 of the 21 days between your weigh-ins. This needs at least 13.',
       action: 'log-food',
+      progress: { label: 'Full days', have: 12, need: 13 },
     });
   });
 });

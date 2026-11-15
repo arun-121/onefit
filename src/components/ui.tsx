@@ -42,6 +42,8 @@ export type IconName = ComponentProps<typeof MaterialCommunityIcons>['name'];
 
 /** App icon names → Material Symbols (the icon set Google's own apps use). */
 const SYMBOLS: Partial<Record<IconName, AndroidSymbol>> = {
+  'chart-bar-stacked': 'data_thresholding',
+  'lock-outline': 'lock',
   'alert-circle-outline': 'error',
   'auto-fix': 'auto_awesome',
   'bell-outline': 'notifications',

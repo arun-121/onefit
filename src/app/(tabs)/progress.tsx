@@ -2,12 +2,15 @@ import * as Haptics from 'expo-haptics';
 import { useRouter } from 'expo-router';
 import { useRef } from 'react';
 import { FlatList, StyleSheet, View } from 'react-native';
+
+import { categoryColors } from '@/constants/category-colors';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { MiniRing } from '@/components/expressive';
 import { GlanceGrid, HeadlineTile, InsightCards, ListRow, WhatShowsUpTile, type SectionKey } from '@/components/insight-cards';
 import { useSnackbar } from '@/components/snackbar';
-import { Avatar, groupCorners, IconButton, ScreenHeader, SectionHeader, SegmentedButtons } from '@/components/ui';
+import { keepUnits } from '@/components/screen-text';
+import { AppText, Avatar, groupCorners, Icon, IconButton, ScreenHeader, SectionHeader, SegmentedButtons, type IconName } from '@/components/ui';
 import { Alpha, AVATAR_SIZE, Spacing, withAlpha } from '@/constants/theme';
 import { setInsightPeriod, useInsightPeriod } from '@/hooks/use-insight-period';
 import { useLiveQuery, useToday } from '@/hooks/use-live-query';
@@ -15,7 +18,7 @@ import { useTheme } from '@/hooks/use-theme';
 import { INSIGHT_PERIODS, type DaySummary, type InsightAction } from '@/lib/insights';
 import { loadInsights } from '@/lib/insights-data';
 import { formatKcal } from '@/lib/nutrition';
-import { budgetProgress, dayRowText, overBudgetShare, periodRangeText, plural } from '@/lib/progress-view';
+import { budgetProgress, dayRowText, overBudgetShare, periodRangeText, plural, type DayRowText } from '@/lib/progress-view';
 import { applyCalculatedTargets, getSettings, updateSettings } from '@/lib/settings';
 import { formatKg } from '@/lib/weight';
 import { refreshWidgets } from '@/widget/refresh';
@@ -26,11 +29,66 @@ const PERIOD_OPTIONS = INSIGHT_PERIODS.map((days) => ({ value: String(days), lab
 const MIN_OVER_ARC = 0.04;
 const RING_STROKE = 4;
 
+/** One small figure of a day: a mark in its subject's colour (a dot for a macro, an icon otherwise) and the figure. */
+function DayFact({ dot, icon, color, children }: { dot?: string; icon?: IconName; color: string; children: string }) {
+  const { colors } = useTheme();
+  return (
+    <View style={styles.fact}>
+      {dot ? <View style={[styles.dot, { backgroundColor: dot }]} /> : icon ? <Icon name={icon} size={16} color={color} /> : null}
+      <AppText variant="bodyMedium" tabular color={colors.onSurfaceVariant} numberOfLines={1}>
+        {keepUnits(children)}
+      </AppText>
+    </View>
+  );
+}
+
+/**
+ * What a day held, as small figures instead of a sentence: protein, carbs and fat with their
+ * category dots (as on Today's tiles), the workout and the weigh-in with their icons, and in words
+ * only what sets the day apart ("Over budget", "Not a full day"), so it is never only a colour.
+ */
+function DayFacts({ text }: { text: DayRowText }) {
+  const { colors, dark } = useTheme();
+  const palette = categoryColors(colors.primary, dark);
+  return (
+    <View style={styles.facts}>
+      {text.grams ? (
+        <>
+          <DayFact dot={palette.protein.color} color={colors.onSurfaceVariant}>
+            {text.grams.protein}
+          </DayFact>
+          <DayFact dot={palette.carbs.color} color={colors.onSurfaceVariant}>
+            {text.grams.carbs}
+          </DayFact>
+          <DayFact dot={palette.fat.color} color={colors.onSurfaceVariant}>
+            {text.grams.fat}
+          </DayFact>
+        </>
+      ) : null}
+      {text.exercise ? (
+        <DayFact icon="run" color={colors.tertiary}>
+          {text.exercise}
+        </DayFact>
+      ) : null}
+      {text.weight ? (
+        <DayFact icon="scale-bathroom" color={colors.primary}>
+          {text.weight}
+        </DayFact>
+      ) : null}
+      {text.flag ? (
+        <AppText variant="labelMedium" color={colors.onSurfaceVariant} numberOfLines={1}>
+          {text.flag}
+        </AppText>
+      ) : null}
+    </View>
+  );
+}
+
 /**
  * One day in "Every day": how full its budget was, what was eaten, and anything else logged. A day
  * over budget has a full ring with a second lap over it for the part that went over, the way its
  * bar on the Calories chart is marked only above the budget. The rows are one segmented group, so
- * each takes its corners from its place in the list.
+ * each takes its corners from its place in the list. The row's sentence is its spoken label.
  */
 function DayRow({ day, today, index, count, onOpen }: { day: DaySummary; today: string; index: number; count: number; onOpen: (date: string) => void }) {
   const { colors } = useTheme();
@@ -62,7 +120,7 @@ function DayRow({ day, today, index, count, onOpen }: { day: DaySummary; today: 
         )
       }
       headline={text.title}
-      lines={[text.macros, text.extras]}
+      below={<DayFacts text={text} />}
       figure={day.logged ? { value: formatKcal(day.calories), label: 'kcal' } : undefined}
       corners={groupCorners(index, count)}
       onPress={() => onOpen(day.date)}
@@ -230,4 +288,7 @@ const styles = StyleSheet.create({
   tiles: { gap: Spacing.sm },
   // The days are one segmented group: 2dp apart, with only the outer corners fully rounded.
   rowGap: { height: Spacing.xxs },
+  facts: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', columnGap: Spacing.md, rowGap: 2, paddingTop: 2 },
+  fact: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  dot: { width: 8, height: 8, borderRadius: 4 },
 });

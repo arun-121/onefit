@@ -1,6 +1,10 @@
 /// <reference types="jest" />
 import {
+  effortLevel,
+  goalPlan,
   goalPlanText,
+  healthSync,
+  weightChange,
   backupProblemsText,
   changeSincePrevious,
   cleanNumberText,
@@ -420,7 +424,7 @@ describe('exerciseTileText', () => {
     const tile = exerciseTileText([]);
     expect(tile).toEqual({
       title: 'Log exercise',
-      detail: 'Adds to today’s budget',
+      detail: 'Adds to budget',
       icon: null,
       lit: false,
       label: 'Log exercise',
@@ -590,7 +594,7 @@ describe('healthText', () => {
     const text = healthText(true, { ...all, writeWeight: false, readWeight: false });
     expect(text.status).toBe('Meals and workouts go to Google Fit. Weigh-ins are not shared yet');
     expect(text.workouts).toBeNull();
-    expect(text.weight).toEqual({ headline: 'Weight is not shared', supporting: 'Send weigh-ins to Google Fit and read them from your scale' });
+    expect(text.weight).toEqual({ headline: 'Weight is not shared', supporting: 'Send weigh-ins and read your scale' });
   });
 
   it('tells writing weight and reading weight apart', () => {
@@ -613,6 +617,8 @@ describe('healthText', () => {
       expect(row).not.toBeNull();
       // Not on a possessive or a joining word with nothing after it.
       expect(row?.supporting).not.toMatch(/(’s|'s| and| or| your| the| to)$/);
+      // Short enough for a row with a button beside it.
+      expect(row?.supporting.length).toBeLessThanOrEqual(40);
     }
   });
 
@@ -768,5 +774,112 @@ describe('goalPlanText', () => {
   it('says when the floor holds the calories up', () => {
     const tiny = { sex: 'female' as const, age: 70, heightCm: 145, weightKg: 40, activity: 'sedentary' as const };
     expect(goalPlanText({ ...tiny, goal: 'lose_fat', rateKg: 1 }, 35)).toMatch(/Held at 1,?200 kcal, the lowest this suggests\.$/);
+  });
+});
+
+describe('weightChange', () => {
+  it('splits the change into the chip and the words beside it', () => {
+    const change = weightChange(78.4, { date: '2026-11-10', kg: 78.8 }, TODAY);
+    expect(change).toMatchObject({ direction: 'down', deltaKg: -0.4, amount: '0.4 kg', since: 'since yesterday (78.8 kg)', towardGoal: false });
+    // The whole sentence is still there, for a screen reader.
+    expect(change?.text).toBe('Down 0.4 kg since yesterday (78.8 kg)');
+  });
+
+  it('is toward the target only when it moves the way the target lies from the weigh-in before', () => {
+    const before = { date: '2026-11-10', kg: 78.8 };
+    expect(weightChange(78.4, before, TODAY, 72)?.towardGoal).toBe(true);
+    expect(weightChange(79.2, before, TODAY, 72)?.towardGoal).toBe(false);
+    expect(weightChange(79.2, before, TODAY, 85)?.towardGoal).toBe(true);
+    // A step past the target is still a step toward it.
+    expect(weightChange(78.0, before, TODAY, 78.5)?.towardGoal).toBe(true);
+    // Already at the target, or no target that is a weight: nothing is toward it.
+    expect(weightChange(78.4, before, TODAY, 78.8)?.towardGoal).toBe(false);
+    expect(weightChange(78.4, before, TODAY, 0)?.towardGoal).toBe(false);
+    expect(weightChange(78.4, before, TODAY, null)?.towardGoal).toBe(false);
+  });
+
+  it('says no change, never toward anything, when the weights read the same', () => {
+    const change = weightChange(78.44, { date: '2026-11-02', kg: 78.36 }, TODAY, 70);
+    // The earlier weight reads the same as the one shown, so the short line does not say it twice.
+    expect(change).toMatchObject({ direction: 'flat', amount: 'No change', since: 'since 2 Nov', towardGoal: false });
+    // The spoken sentence keeps it.
+    expect(change?.text).toBe('No change since 2 Nov (78.4 kg)');
+  });
+
+  it('has nothing to show where changeSincePrevious has nothing to say', () => {
+    expect(weightChange(78.4, null, TODAY, 72)).toBeNull();
+    expect(weightChange(Number.NaN, { date: '2026-11-10', kg: 78.8 }, TODAY)).toBeNull();
+  });
+});
+
+describe('healthSync', () => {
+  const all: HealthGrants = { writeNutrition: true, writeExercise: true, readSteps: true, readActiveCalories: true, writeWeight: true, readWeight: true };
+  const lit = (grants: HealthGrants | null, connected = true) =>
+    healthSync(connected, grants).items.filter((i) => i.on).map((i) => i.key);
+
+  it('shows every icon unlit before connecting, and none until the grants are read', () => {
+    expect(healthSync(false, null)).toEqual({
+      line: 'Sync with Google Fit',
+      items: [
+        { key: 'meals', label: 'Meals', on: false },
+        { key: 'workouts', label: 'Workouts', on: false },
+        { key: 'weight', label: 'Weight', on: false },
+        { key: 'activity', label: 'Activity', on: false },
+      ],
+    });
+    // Old grants do not light anything while syncing is off.
+    expect(lit(all, false)).toEqual([]);
+    expect(healthSync(true, null)).toEqual({ line: 'Meals go to Google Fit', items: [] });
+  });
+
+  it('lights what is allowed, weight only once it goes both ways', () => {
+    expect(lit(all)).toEqual(['meals', 'workouts', 'weight', 'activity']);
+    expect(lit({ ...all, readWeight: false })).toEqual(['meals', 'workouts', 'activity']);
+    expect(lit({ ...all, writeExercise: false, readSteps: false })).toEqual(['meals', 'weight', 'activity']);
+    expect(lit({ ...all, readSteps: false, readActiveCalories: false })).toEqual(['meals', 'workouts', 'weight']);
+  });
+
+  it('keeps the line short enough for a row at a large font size', () => {
+    for (const s of [healthSync(false, null), healthSync(true, null), healthSync(true, all)]) expect(s.line.length).toBeLessThanOrEqual(40);
+  });
+});
+
+describe('goalPlan', () => {
+  const me = { sex: 'male' as const, age: 30, heightCm: 175, weightKg: 80, activity: 'moderate' as const };
+
+  it('gives the figures of the sentence', () => {
+    const lose = goalPlan({ ...me, goal: 'lose_fat', rateKg: 0.5 }, 75);
+    expect(lose).toMatchObject({ kcalVsBurn: -550, proteinPerKg: 2, weeks: 10, targetKg: 75, floored: false });
+    expect(lose.text).toBe(goalPlanText({ ...me, goal: 'lose_fat', rateKg: 0.5 }, 75));
+    expect(goalPlan({ ...me, goal: 'build_muscle', rateKg: 0.25 }, null)).toMatchObject({ kcalVsBurn: 280, weeks: null, targetKg: null });
+    expect(goalPlan({ ...me, goal: 'maintain' }, 70)).toMatchObject({ kcalVsBurn: 0, proteinPerKg: 1.6, weeks: null, targetKg: null });
+    expect(goalPlan({ ...me, goal: 'recomp' }, null).kcalVsBurn).toBeLessThan(0);
+  });
+
+  it('has no weeks for a target the other way, and says when the floor holds', () => {
+    expect(goalPlan({ ...me, goal: 'build_muscle', rateKg: 0.25 }, 75)).toMatchObject({ weeks: null, targetKg: null });
+    const tiny = { sex: 'female' as const, age: 70, heightCm: 145, weightKg: 40, activity: 'sedentary' as const };
+    const held = goalPlan({ ...tiny, goal: 'lose_fat', rateKg: 1 }, 35);
+    expect(held.floored).toBe(true);
+    expect(held.weeks).toBeNull();
+    // The floor sits above what this body burns, so the plan is over it, and the sentence says so.
+    expect(held.kcalVsBurn).toBe(250);
+    expect(held.text).toMatch(/^About 250 kcal a day over what you burn/);
+  });
+});
+
+describe('effortLevel', () => {
+  it('puts a MET in the Compendium band it belongs to', () => {
+    expect(effortLevel(2.5)).toEqual({ level: 1, figure: '2.5 MET', spoken: 'Effort 2.5 MET, light' });
+    expect(effortLevel(3)).toMatchObject({ level: 2, figure: '3 MET' });
+    expect(effortLevel(5.94)).toMatchObject({ level: 2, figure: '5.9 MET' });
+    // Banded as shown: 5.99 reads as 6 MET, so it is drawn as vigorous.
+    expect(effortLevel(5.99)).toMatchObject({ level: 3, figure: '6 MET' });
+    expect(effortLevel(6)).toEqual({ level: 3, figure: '6 MET', spoken: 'Effort 6 MET, vigorous' });
+    expect(effortLevel(11.04)).toMatchObject({ level: 3, figure: '11 MET' });
+  });
+
+  it('shows nothing for a MET that is not a number', () => {
+    for (const met of [Number.NaN, 0, -2, Number.POSITIVE_INFINITY]) expect(effortLevel(met)).toEqual({ level: 0, figure: '', spoken: 'Effort not known' });
   });
 });

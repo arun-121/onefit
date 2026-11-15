@@ -10,8 +10,11 @@ import { useEffect, type ReactNode } from 'react';
 import { ScrollView, StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
 import { Easing, interpolateColor, ReduceMotion, useAnimatedStyle, useSharedValue, withSpring, withTiming } from 'react-native-reanimated';
 
+import { categoryColors, type Category } from '@/constants/category-colors';
 import { Alpha, Shape, Spacing, Springs, TOUCH_TARGET, withAlpha } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
+import type { Confidence, Macros } from '@/lib/types';
+import { effortLevel } from './screen-text';
 import { AppText, Icon, IconButton, Tappable, type IconName, type SelectionTone } from './ui';
 
 /** The round − and + of a value box (dp). Larger than an icon button: they are held, not just tapped. */
@@ -241,8 +244,136 @@ export function Note({
   );
 }
 
+// ---------------------------------------------------------------- effort
+
+/** The three rising bars of an effort mark (dp): the signal-strength shape, read as "how hard". */
+const EFFORT_BARS = [6, 10, 14] as const;
+
+/**
+ * How hard an exercise was, as three rising bars and its MET: one bar light (under 3 MET), two
+ * moderate, three vigorous, the Compendium's bands. The bars are movement's `tertiary`; the
+ * unfilled ones are the faint track every bar in the app uses. One element to a screen reader.
+ */
+export function EffortMark({ met }: { met: number }) {
+  const { colors } = useTheme();
+  const effort = effortLevel(met);
+  if (effort.level === 0) return null;
+  const track = withAlpha(colors.onSurface, Alpha.track);
+  return (
+    <View style={styles.effort} accessible accessibilityLabel={effort.spoken}>
+      <View style={styles.effortBars}>
+        {EFFORT_BARS.map((h, i) => (
+          <View key={h} style={[styles.effortBar, { height: h, backgroundColor: i < effort.level ? colors.tertiary : track }]} />
+        ))}
+      </View>
+      <AppText variant="labelMedium" tabular color={colors.onSurfaceVariant} numberOfLines={1}>
+        {effort.figure}
+      </AppText>
+    </View>
+  );
+}
+
+// ---------------------------------------------------------------- confidence
+
+const CONFIDENCE_DOTS: Record<Confidence, number> = { low: 1, medium: 2, high: 3 };
+const CONFIDENCE_WORDS: Record<Confidence, string> = { low: 'Rough guess', medium: 'Fair guess', high: 'Good guess' };
+
+/**
+ * How sure an AI estimate is, as a small quiet pill: three dots, as many filled as it is sure
+ * (in food's `primary`), and two words. Not pressable: the fields beside it are what to change.
+ * `spoken` is the whole sentence the pill replaces.
+ */
+export function ConfidenceChip({ confidence, spoken }: { confidence: Confidence; spoken: string }) {
+  const { colors } = useTheme();
+  const filled = CONFIDENCE_DOTS[confidence];
+  return (
+    <View style={[styles.confidence, { backgroundColor: colors.surfaceContainerHighest }]} accessible accessibilityLabel={spoken}>
+      <View style={styles.dots}>
+        {[0, 1, 2].map((i) => (
+          <View
+            key={i}
+            style={[styles.confidenceDot, i < filled ? { backgroundColor: colors.primary } : { borderWidth: 1.5, borderColor: colors.outline }]}
+          />
+        ))}
+      </View>
+      <AppText variant="labelLarge" color={colors.onSurfaceVariant} numberOfLines={1}>
+        {CONFIDENCE_WORDS[confidence]}
+      </AppText>
+    </View>
+  );
+}
+
+// ---------------------------------------------------------------- macros
+
+const MACRO_ORDER: { key: Category; word: string }[] = [
+  { key: 'protein', word: 'protein' },
+  { key: 'carbs', word: 'carbs' },
+  { key: 'fat', word: 'fat' },
+];
+
+/**
+ * Protein, carbs and fat as three figures in a row, each with a dot of its category colour: the
+ * grams emphasised, the word after them quiet. Replaces "15 g protein, 17 g carbs, 22 g fat" as a
+ * sentence; one element to a screen reader. `color` is the text colour of the surface it sits on.
+ * This is how grams of the three macros are drawn on every sheet (Log food, the day, a meal, the
+ * targets calculator), so they read the same everywhere. `stacked` puts them one under another,
+ * for a narrow column; `accessibilityLabel` replaces the spoken grams when there is more to say.
+ */
+export function MacroFigures({
+  totals,
+  color,
+  stacked = false,
+  accessibilityLabel,
+}: {
+  totals: Pick<Macros, 'protein' | 'carbs' | 'fat'>;
+  color?: string;
+  stacked?: boolean;
+  accessibilityLabel?: string;
+}) {
+  const { colors, dark } = useTheme();
+  const palette = categoryColors(colors.primary, dark);
+  const fg = color ?? colors.onSurface;
+  const grams = (n: number) => (Number.isFinite(n) ? Math.round(n) : 0);
+  return (
+    <View
+      style={stacked ? styles.macrosStacked : styles.macros}
+      accessible
+      accessibilityLabel={accessibilityLabel ?? MACRO_ORDER.map((m) => `${grams(totals[m.key])} grams ${m.word}`).join(', ')}>
+      {MACRO_ORDER.map((m) => (
+        <View key={m.key} style={styles.macro}>
+          <View style={[styles.macroDot, { backgroundColor: palette[m.key].color }]} />
+          <AppText variant="labelLarge" color={color ? withAlpha(fg, 0.8) : colors.onSurfaceVariant} numberOfLines={1}>
+            <AppText variant="labelLarge" emphasized tabular color={fg}>
+              {`${grams(totals[m.key])}\u00A0g`}
+            </AppText>
+            {` ${m.word}`}
+          </AppText>
+        </View>
+      ))}
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   fill: { flex: 1, minWidth: 0 },
+  effort: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  effortBars: { flexDirection: 'row', alignItems: 'flex-end', gap: 2, height: EFFORT_BARS[2] },
+  effortBar: { width: 4, borderRadius: 2 },
+  confidence: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    gap: Spacing.sm,
+    minHeight: 28,
+    paddingHorizontal: Spacing.md,
+    borderRadius: Shape.full,
+  },
+  dots: { flexDirection: 'row', gap: 3 },
+  confidenceDot: { width: 7, height: 7, borderRadius: 3.5 },
+  macros: { flexDirection: 'row', flexWrap: 'wrap', columnGap: Spacing.lg, rowGap: Spacing.xs },
+  macrosStacked: { gap: Spacing.xs },
+  macro: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  macroDot: { width: 8, height: 8, borderRadius: 4 },
   sheet: { paddingHorizontal: Spacing.lg, paddingBottom: Spacing.xxl, gap: Spacing.xl },
   noHandle: { paddingTop: Spacing.lg },
   handleArea: { alignItems: 'center', paddingTop: Spacing.md, paddingBottom: Spacing.md },

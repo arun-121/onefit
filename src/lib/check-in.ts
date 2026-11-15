@@ -30,6 +30,13 @@ export interface CheckIn {
   /** What the owner burns, as Progress says it. */
   burnKcal: number;
   burnText: string;
+  /** The two ends of the burn estimate (Progress's range), kcal a day: the band on the card's picture. */
+  burnLow: number;
+  burnHigh: number;
+  /** How sure the burn estimate is; a rough one never makes a check-in. */
+  confidence: 'fair' | 'good';
+  /** The targets as they are now, before the check-in. */
+  current: Macros;
   /** The targets the check-in would set. */
   targets: Targets;
   /** New calorie target minus the current one. */
@@ -40,6 +47,8 @@ export interface CheckIn {
   onTrack: boolean;
   title: string;
   body: string;
+  /** The card's one line, under the picture: what the target is for ("To lose 0.5 kg a week."). */
+  line: string;
 }
 
 const kcal = (n: number): string => `${formatKcal(n)} kcal`;
@@ -70,22 +79,24 @@ export function weeklyCheckIn(input: CheckInInput): CheckIn | null {
           : 'To hold your weight';
   const burn = `From your food and weigh-ins, you burn about ${kcal(m.kcal)} a day (${m.rangeText.charAt(0).toLowerCase()}${m.rangeText.slice(1)}).`;
 
+  const measured = { burnKcal: m.kcal, burnText: burn, burnLow: m.low, burnHigh: m.high, confidence: m.confidence, current: { ...goals } };
+
   if (onTrack) {
     return {
-      burnKcal: m.kcal,
-      burnText: burn,
+      ...measured,
       targets: { ...goals },
       change: 0,
       capped: false,
       onTrack: true,
       title: 'Weekly check-in: on track',
       body: `${burn} ${aim}, your ${kcal(goals.calories)} target still fits.`,
+      // The card's "On track" chip already says the target still fits; the line says what it is for.
+      line: `${aim}.`,
     };
   }
   const direction = change > 0 ? 'more' : 'less';
   return {
-    burnKcal: m.kcal,
-    burnText: burn,
+    ...measured,
     targets,
     change,
     capped,
@@ -95,7 +106,21 @@ export function weeklyCheckIn(input: CheckInInput): CheckIn | null {
       `${burn} ${aim}, eat about ${kcal(targets.calories)}: ${kcal(Math.abs(change))} ${direction} than now, ` +
       `with ${targets.protein} g protein, ${targets.carbs} g carbs and ${targets.fat} g fat.` +
       (capped ? ` That is one step of ${kcal(CHECK_IN_MAX_STEP_KCAL)}; next week's check-in can go further.` : ''),
+    line: capped ? `${aim}, one ${kcal(CHECK_IN_MAX_STEP_KCAL)} step a week.` : `${aim}.`,
   };
+}
+
+/**
+ * The scale of the check-in's picture: from a little under the lowest of the burn range and the two
+ * targets to a little over the highest, in whole hundreds, so every mark sits clear of the ends.
+ */
+export function checkInScale(c: Pick<CheckIn, 'burnLow' | 'burnHigh' | 'targets' | 'current'>): { min: number; max: number } {
+  const values = [c.burnLow, c.burnHigh, c.targets.calories, c.current.calories].filter((v) => Number.isFinite(v));
+  if (values.length === 0) return { min: 0, max: 1 };
+  const lo = Math.min(...values);
+  const hi = Math.max(...values);
+  const pad = Math.max(100, (hi - lo) * 0.15);
+  return { min: Math.max(0, Math.floor((lo - pad) / 100) * 100), max: Math.ceil((hi + pad) / 100) * 100 };
 }
 
 /** The goal in words, for the check-in's caption. */

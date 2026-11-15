@@ -2,9 +2,12 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useState } from 'react';
 import { Alert, ScrollView, StyleSheet, View } from 'react-native';
 
-import { ChoiceTile, Note, Sheet, SheetHeader, useValueColor, ValueBox } from '@/components/sheet-parts';
-import { AppText, Button, Chip, Group, GroupRow, IconButton, NumberField, SegmentedButtons, TextField, type IconName } from '@/components/ui';
-import { Shape, Spacing, TOUCH_TARGET } from '@/constants/theme';
+import { Disclosure, GlanceFigure } from '@/components/glance';
+import { effortLevel, keepUnits } from '@/components/screen-text';
+import { Chevron, Panel } from '@/components/settings-parts';
+import { ChoiceTile, EffortMark, Note, Sheet, SheetHeader, useValueColor, ValueBox } from '@/components/sheet-parts';
+import { AppText, Avatar, Button, Chip, Group, GroupItem, NumberField, SegmentedButtons, TextField, type IconName } from '@/components/ui';
+import { Spacing, TOUCH_TARGET } from '@/constants/theme';
 import { useLiveQuery, useToday } from '@/hooks/use-live-query';
 import { useTheme } from '@/hooks/use-theme';
 import { formatDayLabel } from '@/lib/dates';
@@ -144,15 +147,20 @@ function DescribeForm({ date, today, onByHand }: { date: string; today: string; 
           autoFocus
         />
       </View>
-      <Button
-        title={drafts ? 'Work it out again' : 'Work it out'}
-        icon="auto-fix"
-        size="large"
-        variant={drafts ? 'tonal' : 'filled'}
-        loading={busy}
-        disabled={text.trim().length === 0 || busy}
-        onPress={() => void workOut()}
-      />
+      {/* The two ways in, as Log food has them: the AI, and under it the hand-picked activity. So the
+          sheet still ends on its one main button once there is a workout to log. */}
+      <View style={styles.actions}>
+        <Button
+          title={drafts ? 'Work it out again' : 'Work it out'}
+          icon="auto-fix"
+          size="large"
+          variant={drafts ? 'tonal' : 'filled'}
+          loading={busy}
+          disabled={text.trim().length === 0 || busy}
+          onPress={() => void workOut()}
+        />
+        <Button title="Pick an activity instead" variant="text" hitSlop={4} onPress={onByHand} style={styles.end} />
+      </View>
       {error ? (
         <Note icon="alert-circle-outline" color={colors.error}>
           {error}
@@ -160,58 +168,56 @@ function DescribeForm({ date, today, onByHand }: { date: string; today: string; 
       ) : null}
 
       {drafts && drafts.length > 0 ? (
-        <View style={styles.block}>
+        <View style={styles.results}>
+          {/* The one number: what the whole workout burned, and in how long. */}
+          <GlanceFigure
+            value={formatKcal(total)}
+            unit={`kcal in ${formatMinutes(minutes)}`}
+            accessibilityLabel={`${total} calories in ${formatMinutes(minutes)}, from ${drafts.length} ${drafts.length === 1 ? 'exercise' : 'exercises'}`}
+          />
+          {/* A tapped exercise opens its editor straight under it, as a row of the same group, the way
+              a row opens in Settings; the chevron says which one is open. */}
           <Group>
-            {drafts.map((d) => (
-              <GroupRow
-                key={d.key}
-                icon={ACTIVITIES[d.activity].icon as IconName}
-                tone="tertiary"
-                headline={d.name}
-                supporting={`${d.details ? `${d.details}, ` : ''}${formatMinutes(d.minutes)}`}
-                trailing={
-                  <AppText variant="labelLarge" tabular color={colors.tertiary}>
-                    {`+${formatKcal(d.calories)} kcal`}
-                  </AppText>
-                }
-                onPress={() => setOpen((k) => (k === d.key ? null : d.key))}
-                accessibilityLabel={`${d.name}, ${formatMinutes(d.minutes)}, ${d.calories} calories. Change`}
-              />
-            ))}
+            {drafts.map((d) => [
+              <DraftRow key={d.key} draft={d} open={open === d.key} onPress={() => setOpen((k) => (k === d.key ? null : d.key))} />,
+              open === d.key ? (
+                <Panel key={`${d.key}-editor`} appear color={colors.surfaceContainerHigh}>
+                  <View style={styles.row}>
+                    <NumberField
+                      label="Minutes"
+                      value={d.minutes}
+                      selectOnFocus
+                      // New minutes, new calories at the same effort.
+                      onChange={(m) => patch(d.key, { minutes: Math.round(m), calories: burnFromMet(d.met, m, weight) })}
+                    />
+                    <NumberField label="Calories" suffix="kcal" value={d.calories} selectOnFocus onChange={(c) => patch(d.key, { calories: Math.round(c) })} />
+                  </View>
+                  <View style={styles.editorFoot}>
+                    <AppText variant="bodySmall" color={colors.onSurfaceVariant} style={styles.grow}>
+                      {`Logged as ${ACTIVITIES[d.activity].label.toLowerCase()}, ${INTENSITY_LABELS[d.intensity].toLowerCase()}`}
+                    </AppText>
+                    <Button
+                      title="Remove"
+                      icon="trash-can-outline"
+                      variant="text"
+                      hitSlop={4}
+                      accessibilityLabel={`Remove ${d.name}`}
+                      onPress={() => {
+                        setDrafts((list) => list?.filter((x) => x.key !== d.key) ?? null);
+                        setOpen(null);
+                      }}
+                    />
+                  </View>
+                </Panel>
+              ) : null,
+            ])}
           </Group>
-          {drafts
-            .filter((d) => d.key === open)
-            .map((d) => (
-              <View key={d.key} style={[styles.editor, { backgroundColor: colors.surfaceContainerHigh }]}>
-                <View style={styles.editorHead}>
-                  <AppText variant="titleSmall" emphasized style={styles.grow}>
-                    {d.name}
-                  </AppText>
-                  <IconButton
-                    icon="trash-can-outline"
-                    label={`Remove ${d.name}`}
-                    onPress={() => {
-                      setDrafts((list) => list?.filter((x) => x.key !== d.key) ?? null);
-                      setOpen(null);
-                    }}
-                  />
-                </View>
-                <View style={styles.row}>
-                  <NumberField
-                    label="Minutes"
-                    value={d.minutes}
-                    selectOnFocus
-                    // New minutes, new calories at the same effort.
-                    onChange={(m) => patch(d.key, { minutes: Math.round(m), calories: burnFromMet(d.met, m, weight) })}
-                  />
-                  <NumberField label="Calories" suffix="kcal" value={d.calories} selectOnFocus onChange={(c) => patch(d.key, { calories: Math.round(c) })} />
-                </View>
-                <AppText variant="bodySmall" color={colors.onSurfaceVariant}>
-                  {`Effort ${d.met} MET, ${ACTIVITIES[d.activity].label.toLowerCase()}, ${INTENSITY_LABELS[d.intensity].toLowerCase()}.`}
-                </AppText>
-              </View>
-            ))}
-          <Note>{`${note ? `${note} ` : ''}Calories are worked out for ${Math.round(weight)} kg from each exercise's effort. Tap one to change it.`}</Note>
+          {/* The AI's own note stays, as the one line; how the figures are made is one tap away. */}
+          {note ? <Note>{note}</Note> : null}
+          <Disclosure>
+            {keepUnits(`Calories are worked out for ${Math.round(weight)} kg from each exercise's effort, its MET: (MET − 1) × weight × hours, what the workout adds on top of resting.`)}
+            {'The bars show the effort: one under 3 MET, two up to 6, three from 6. Tap an exercise to change its minutes or calories.'}
+          </Disclosure>
         </View>
       ) : drafts ? (
         <Note>{note}</Note>
@@ -219,7 +225,8 @@ function DescribeForm({ date, today, onByHand }: { date: string; today: string; 
 
       {drafts && drafts.length > 0 ? (
         <Button
-          title={`Log workout, +${formatKcal(total)} kcal`}
+          // The total is the figure above the list; the button only says what it does.
+          title="Log workout"
           size="large"
           icon="check"
           loading={saving}
@@ -227,8 +234,52 @@ function DescribeForm({ date, today, onByHand }: { date: string; today: string; 
           accessibilityLabel={`Log workout: ${formatMinutes(minutes)}, ${total} calories`}
         />
       ) : null}
-      <Button title="Pick an activity instead" variant="text" onPress={onByHand} style={styles.end} />
     </Sheet>
+  );
+}
+
+/**
+ * One exercise the AI read from the description, as a row of a segmented group: the activity's
+ * avatar, the name and what was done, the effort as rising bars, and at the right the calories
+ * (movement's `tertiary`) over the minutes, then the chevron of a row that opens. Tapping it opens
+ * its editor under it, and the chevron turns over.
+ */
+function DraftRow({ draft: d, open, onPress }: { draft: WorkoutDraft; open: boolean; onPress: () => void }) {
+  const { colors } = useTheme();
+  return (
+    <GroupItem
+      onPress={onPress}
+      accessibilityState={{ expanded: open }}
+      accessibilityLabel={`${d.name}${d.details ? `, ${d.details}` : ''}, ${formatMinutes(d.minutes)}, ${d.calories} calories, ${effortLevel(d.met).spoken}. Change`}
+      style={styles.draft}>
+      <Avatar icon={ACTIVITIES[d.activity].icon as IconName} tone="tertiary" />
+      <View style={styles.draftText}>
+        <AppText variant="titleMedium" numberOfLines={2}>
+          {d.name}
+        </AppText>
+        {/* What was done, then how hard: one line that wraps the effort under it only when it must. */}
+        <View style={styles.draftMeta}>
+          {d.details ? (
+            <AppText variant="bodyMedium" color={colors.onSurfaceVariant} numberOfLines={1} style={styles.shrink}>
+              {keepUnits(d.details)}
+            </AppText>
+          ) : null}
+          <EffortMark met={d.met} />
+        </View>
+      </View>
+      <View style={styles.draftFigures}>
+        <AppText variant="titleMedium" emphasized tabular color={colors.tertiary} numberOfLines={1}>
+          {`+${formatKcal(d.calories)}`}
+          <AppText variant="labelLarge" color={colors.tertiary}>
+            {'\u00A0kcal'}
+          </AppText>
+        </AppText>
+        <AppText variant="labelMedium" tabular color={colors.onSurfaceVariant} numberOfLines={1}>
+          {formatMinutes(d.minutes)}
+        </AppText>
+      </View>
+      <Chevron open={open} />
+    </GroupItem>
   );
 }
 
@@ -363,9 +414,7 @@ function ManualForm({ existing, date, today }: { existing: Exercise | null; date
       <View style={styles.field}>
         <NumberField label="Calories burned" suffix="kcal" value={calories} onChange={(n) => setCustomKcal(Math.round(n))} />
         <AppText variant="bodySmall" color={colors.onSurfaceVariant} textBreakStrategy="balanced" style={styles.helper}>
-          {customKcal === undefined
-            ? `Estimated for ${Math.round(weight)} kg. Change it if you know the real figure.`
-            : `Your number. The estimate was ${estimate} kcal.`}
+          {customKcal === undefined ? `Estimate for ${Math.round(weight)} kg` : `Your figure. Estimate ${formatKcal(estimate)} kcal`}
         </AppText>
       </View>
 
@@ -377,6 +426,8 @@ function ManualForm({ existing, date, today }: { existing: Exercise | null; date
 const styles = StyleSheet.create({
   activities: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.sm },
   block: { gap: Spacing.sm },
+  results: { gap: Spacing.md },
+  actions: { gap: Spacing.sm },
   value: { alignItems: 'center' },
   // The quick lengths sit centred under the number. At a large font size they no longer fit the
   // row, and then it scrolls sideways out of the sheet's gutter instead of wrapping one pill alone.
@@ -385,8 +436,14 @@ const styles = StyleSheet.create({
   field: { gap: Spacing.xs },
   row: { flexDirection: 'row', gap: Spacing.sm, alignItems: 'flex-start' },
   grow: { flex: 1, minWidth: 0 },
-  editor: { borderRadius: Shape.large, padding: Spacing.lg, gap: Spacing.sm },
-  editorHead: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
+  // The measures of a GroupRow, with room for a third line: the effort, and the chevron at the end.
+  draft: { flexDirection: 'row', alignItems: 'center', gap: Spacing.lg, minHeight: 72, paddingHorizontal: Spacing.lg, paddingVertical: Spacing.md },
+  draftText: { flex: 1, minWidth: 0, gap: 2 },
+  draftMeta: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', columnGap: Spacing.md, rowGap: 2 },
+  shrink: { flexShrink: 1 },
+  draftFigures: { alignItems: 'flex-end' },
+  // What the exercise is logged as, and the button that takes it off the list.
+  editorFoot: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, marginBottom: -Spacing.sm, marginRight: -Spacing.md },
   end: { alignSelf: 'center' },
   helper: { paddingHorizontal: Spacing.lg },
 });

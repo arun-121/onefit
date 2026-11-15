@@ -246,3 +246,68 @@ on. An unlit tile says what to do, not what is missing. A button says what happe
 8. Every tappable surface uses `Tappable` (or a `Button`/`Chip` built on it).
 9. Dark mode keeps the same hierarchy; nothing relies on a shadow except the FAB.
 10. It still looks like a sibling of Today.
+
+## Show, don't tell (version 3)
+
+The owner, 2026-11-15: "there are too many text informations in the whole app … visually convey them so
+users dont have to just read everything, make it appealing". This section changes how every card speaks.
+Where it conflicts with the sections above, it wins.
+
+### The rule: one number, one picture, one line
+
+Every card answers its question with **one figure** (the hero, tabular, emphasised), **one picture** that
+shows where that figure sits (a bar, a range, dots, a ring), and **at most one line** of words, about
+60 characters. Everything else a card used to say (how it is worked out, what is left out, what to log)
+moves behind a **"How it's worked out"** disclosure at the foot of the card. The honesty PRODUCT.md
+asks for is kept, but it is one tap away instead of in the way.
+
+```
+┌──────────────────────────────────────────┐
+│ (●) Burn                      [Good est.]│  avatar, 1–3 word title, status chip
+│                                          │
+│ 2,450 kcal   ▼ 450 under                 │  hero figure + delta chip
+│ ├────[▓▓▓▓▓▓]────────┤                   │  picture: range band, goal and intake marks
+│   eat 1,939   goal 2,000                 │  marks are labelled in place, not in a legend
+│ Losing about 0.4 kg a week.              │  the one line
+│ How it's worked out              ⌄       │  disclosure (the old paragraphs)
+└──────────────────────────────────────────┘
+```
+
+### The picture vocabulary (`src/components/glance.tsx`)
+
+Each kind of fact has one picture, used the same way everywhere, so the owner learns to read them once.
+
+| Fact | Picture | Example |
+| --- | --- | --- |
+| A change | **Delta chip**: arrow and amount, filled `primaryContainer` when it is toward the goal, quiet `surfaceContainerHighest` when not. Never red: only the part of a day over budget is `error`. | ▼ 0.4 kg/wk |
+| A value against a range | **Range bar**: track, shaded band for the range, labelled marks for goal and actual | burn 2,350–2,550, goal 2,000 |
+| A share of a whole | **Split bar**: one stacked bar, segments in the subject's colours, labels under the segments | meals, macros, weekdays vs weekend |
+| Days hit or missed | **Day dots**: a row of small dots, filled for a hit, ringed for a miss, today hollow | protein on 5 of 7 days |
+| Progress to a target | **Small ring** with the per cent inside | 79% of the way to 72 kg |
+| A few counts | **Stat row**: 2 to 3 facts, each an icon, a number and a 1–2 word label | three cells: 25 days, 24 weigh-ins, 10 workouts |
+| Not enough data yet | **Unlock meter**: segmented bar of what is there against what is needed, and the one action | weigh-ins 3 of 7, Log weight |
+| Ranked items | **Bar rows**: name, number, and a thin bar for its share; no "11% of your calories" lines | top foods, top activities |
+
+### Words that stay
+
+- Titles are 1 to 3 words ("Burn", "Protein", "Weekends"), never a sentence.
+- The one line says what the picture means in the owner's terms; it never repeats a number already drawn.
+- Labels sit on the marks they label. Legends only where marks cannot carry their own label.
+- No middle-dot meta strings, no all-caps eyebrows, no arrows appended to buttons.
+
+### Motion (Emil Kowalski's rules)
+
+- The disclosure opens with height and opacity, 200 ms, strong ease-out (`cubic-bezier(0.23, 1, 0.32, 1)`),
+  and the chevron turns with it; it closes in 150 ms. Under reduced motion it only fades.
+- Pictures are drawn in place; only Today's hero ring and macro bars spring, as before. Cards seen
+  several times a day do not animate in.
+- Every tappable card, chip and row presses to 0.97 through `Tappable`.
+
+### Checked against the brief (frontend-design's self-review)
+
+- The default it could slide into: a dashboard of identical KPI tiles ("big number, small label, delta").
+  We avoid it by letting the **picture differ by fact** (range, split, dots, ring), keeping one lit focal
+  card per screen (Today's ring, Progress's headline), and putting the rest on quiet unlit surfaces in
+  segmented groups, as Google Home does.
+- One memorable thing per screen: Today's wavy budget ring, Progress's weight line. Everything else is
+  quiet and consistent.

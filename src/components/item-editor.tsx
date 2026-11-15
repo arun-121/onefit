@@ -7,7 +7,7 @@ import { StyleSheet, useWindowDimensions, View, type LayoutChangeEvent } from 'r
 
 import { Spacing } from '@/constants/theme';
 import { MEAL_LABELS, MEALS, type DraftItem, type Meal } from '@/lib/types';
-import { Note } from './sheet-parts';
+import { ConfidenceChip } from './sheet-parts';
 import { GroupItem, IconButton, NumberField, SegmentedButtons, TextField } from './ui';
 
 /** The width "Breakfast", the longest meal name, takes as the emphasised label of a segment (dp at font scale 1). */
@@ -134,7 +134,7 @@ export function FoodFields({
 
 /**
  * One food on the Log food review list, as a row of a segmented group: its fields, a button that
- * takes it off the list, and a note when the estimate was a rough guess.
+ * takes it off the list, and a small chip when the estimate was a rough guess.
  */
 export function ItemEditor({
   item,
@@ -154,7 +154,8 @@ export function ItemEditor({
         portionPlaceholder="e.g. 2 large"
         trailing={<IconButton icon="close" label={`Remove ${item.name || 'item'}`} onPress={onRemove} />}
       />
-      {item.confidence === 'low' ? <Note icon="alert-circle-outline">Rough guess. Check the amount and calories.</Note> : null}
+      {/* A rough guess says so as a picture: one of three dots. The words it replaced are what it says aloud. */}
+      {item.confidence === 'low' ? <ConfidenceChip confidence="low" spoken="Rough guess. Check the amount and calories." /> : null}
     </GroupItem>
   );
 }

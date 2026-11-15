@@ -91,13 +91,14 @@ export function goalAdjustment(p: Profile): number {
     case 'recomp':
       return -RECOMP_DEFICIT * tdee(p);
     case 'maintain':
+    default:
       return 0;
   }
 }
 
 /** Grams of protein per kg of body weight for a goal. */
 export function proteinPerKg(goal: GoalType): number {
-  return PROTEIN_PER_KG[goal];
+  return PROTEIN_PER_KG[goal] ?? PROTEIN_PER_KG.maintain;
 }
 
 /**
@@ -111,7 +112,8 @@ export function calculateTargets(p: Profile): Targets {
 /** Calories (to the nearest 10, never under the floor) split into macros for a goal and a body weight. */
 export function splitTargets(rawCalories: number, goal: GoalType, weightKg: number): Targets {
   const calories = Math.max(MIN_CALORIE_TARGET, Math.round(rawCalories / 10) * 10);
-  const protein = Math.round(PROTEIN_PER_KG[goal] * weightKg);
+  // A goal this version does not know (a profile not read through the settings) counts as maintain.
+  const protein = Math.round((PROTEIN_PER_KG[goal] ?? PROTEIN_PER_KG.maintain) * weightKg);
   const fat = Math.round((calories * 0.25) / 9);
   const carbs = Math.max(0, Math.round((calories - protein * 4 - fat * 9) / 4));
   return { calories, protein, carbs, fat };
@@ -130,6 +132,7 @@ export function goalAdjustmentFrom(burnKcal: number, p: Pick<Profile, 'goal' | '
     case 'recomp':
       return -RECOMP_DEFICIT * burnKcal;
     case 'maintain':
+    default:
       return 0;
   }
 }

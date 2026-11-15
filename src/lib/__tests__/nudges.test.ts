@@ -115,4 +115,115 @@ describe('findNudges', () => {
     expect(all[0].id).toBe(`missed-${YESTERDAY}`);
     expect(findNudges(input, new Set([`missed-${YESTERDAY}`])).map((n) => n.id)).not.toContain(`missed-${YESTERDAY}`);
   });
+
+  describe('visual', () => {
+    it('draws a missed day as a week of dots, the missed day a ring and today open', () => {
+      const missing = days(20).filter((d) => d.date !== YESTERDAY);
+      const n = findNudges({ ...base, days: missing })[0];
+      const v = n.visual!;
+      expect(v.heading).toBe('Saturday not logged');
+      // The body is one short sentence, so it is the line, and the card has no disclosure to say it again.
+      expect(v.line).toBe(n.body);
+      expect(v.picture).toMatchObject({ kind: 'days', tone: 'primary' });
+      const dots = v.picture!.kind === 'days' ? v.picture!.days : [];
+      expect(dots.map((d) => d.mark)).toEqual(['hit', 'hit', 'hit', 'hit', 'hit', 'miss', 'today']);
+      expect(dots.map((d) => d.label).join('')).toBe('MTWTFSS');
+    });
+
+    it('draws a high day as that day against the usual', () => {
+      const n = findNudges({ ...base, days: days(20, 2000, 140, { [YESTERDAY]: { calories: 3600 } }) })[0];
+      expect(n.visual).toMatchObject({ heading: 'Highest in a month', picture: { kind: 'compare', day: { name: 'Saturday', kcal: 3600 } } });
+      const usual = n.visual!.picture!.kind === 'compare' ? n.visual!.picture!.usualKcal : 0;
+      expect(n.body).toContain(`usual ${usual.toLocaleString('en-US')} kcal`);
+    });
+
+    it('draws low protein as the last four full days, each named, under the goal or not', () => {
+      const n = findNudges({ ...base, days: days(20, 2000, 90, { [addDays(TODAY, -2)]: { protein: 130 } }) }).find((x) => x.title === 'Protein has been low')!;
+      // 90, 130, 90 and 90 g.
+      expect(n.visual!.figure).toMatchObject({ value: '100 g', unit: 'a day, goal 140 g' });
+      const dots = n.visual!.picture!.kind === 'days' ? n.visual!.picture!.days : [];
+      expect(dots.map((d) => `${d.label} ${d.mark}`)).toEqual(['Wed miss', 'Thu miss', 'Fri hit', 'Sat miss']);
+    });
+
+    it('shows a weigh-in jump as a change that is never toward the goal', () => {
+      const weights = [
+        { date: addDays(TODAY, -5), kg: 80 },
+        { date: addDays(TODAY, -4), kg: 80.2 },
+        { date: addDays(TODAY, -3), kg: 79.9 },
+        { date: TODAY, kg: 78.4 },
+      ];
+      const v = findNudges({ ...base, weights }).find((x) => x.id === `jump-${TODAY}`)!.visual!;
+      expect(v.figure).toMatchObject({ value: '78.4', unit: 'kg', change: { direction: 'down', amount: '1.6 kg', towardGoal: false } });
+      // What the change is measured from: the weigh-ins before as a band, this one as a dot below it.
+      expect(v.picture).toEqual({ kind: 'reading', tone: 'primary', lowKg: 79.9, highKg: 80.2, kg: 78.4, label: 'Sun' });
+      expect(v.line!.length).toBeLessThanOrEqual(60);
+    });
+
+    it('shows a new best as the set with what it gained', () => {
+      const lift = (date: string, kg: number, reps: number): Exercise => ({
+        id: 1, date, activity: 'strength', minutes: 12, intensity: 'hard', calories: 60, createdAt: 0, hcSessionId: null, hcCaloriesId: null,
+        name: 'Bench press', details: '', sets: 4, reps, loadKg: kg, met: 5,
+      });
+      const best = (a: [number, number], b: [number, number]) =>
+        findNudges({ ...base, exercises: [lift(addDays(TODAY, -7), ...a), lift(TODAY, ...b)] })[0].visual!;
+      expect(best([60, 8], [62.5, 8])).toMatchObject({
+        heading: 'New best',
+        figure: { value: '62.5 kg × 8', unit: 'Bench press', change: { direction: 'up', amount: '2.5 kg', towardGoal: true } },
+        line: 'Next time try 65 kg × 8, or one more rep.',
+      });
+      expect(best([60, 8], [60, 10]).figure!.change!.amount).toBe('2 reps');
+      expect(best([60, 10], [65, 8]).figure!.change!.amount).toBe('from 60 kg × 10');
+    });
+
+    it('draws a gap in weigh-ins as ten days of dots with the last weigh-in filled', () => {
+      const v = findNudges({ ...base, weights: [{ date: addDays(TODAY, -8), kg: 80 }] }).find((x) => x.id === 'noweigh-2026-11-09')!.visual!;
+      expect(v.figure).toMatchObject({ value: '8', unit: 'days' });
+      const dots = v.picture!.kind === 'days' ? v.picture!.days : [];
+      expect(dots).toHaveLength(10);
+      expect(dots.map((d) => d.mark)).toEqual(['miss', 'hit', 'miss', 'miss', 'miss', 'miss', 'miss', 'miss', 'miss', 'today']);
+    });
+
+    it('draws a streak as its run of days, with today open until it is logged', () => {
+      const logged = Array.from({ length: 7 }, (_, k) => addDays(TODAY, -k - 1));
+      const v = findNudges({ ...base, loggedDates: logged }).find((x) => x.id === `streak-7-${TODAY}`)!.visual!;
+      const dots = v.picture!.kind === 'days' ? v.picture!.days : [];
+      expect(v.heading).toBe('7-day streak');
+      expect(dots.map((d) => d.mark)).toEqual([...Array(7).fill('hit'), 'today']);
+      const withToday = findNudges({ ...base, loggedDates: [TODAY, ...logged.slice(0, 6)] }).find((x) => x.id === `streak-7-${TODAY}`)!.visual!;
+      expect(withToday.picture!.kind === 'days' ? withToday.picture!.days.map((d) => d.mark) : []).toEqual(Array(7).fill('hit'));
+    });
+
+    it('gives every rule a heading of a few words and a picture or a figure', () => {
+      const missing = days(20, 2000, 90).filter((d) => d.date !== YESTERDAY);
+      const all = [
+        ...findNudges({ ...base, days: missing }),
+        ...findNudges({ ...base, days: days(20, 2000, 140, { [YESTERDAY]: { calories: 3600 } }) }),
+        ...findNudges({ ...base, days: days(20, 2000, 140, { [YESTERDAY]: { calories: 600, count: 1 } }) }),
+      ];
+      expect(all.length).toBeGreaterThan(2);
+      for (const n of all) {
+        expect(n.visual).toBeDefined();
+        expect(n.visual!.heading.split(' ').length).toBeLessThanOrEqual(4);
+        expect(n.visual!.picture ?? n.visual!.figure).toBeDefined();
+      }
+    });
+  });
+});
+
+describe('pace off', () => {
+  // Rising about 0.4 kg a week while losing fat, the weigh-ins given newest first.
+  const rising = Array.from({ length: 14 }, (_, k) => ({ date: addDays(TODAY, -2 * k), kg: 81.2 - 0.12 * k + (k % 2) * 0.04 }));
+
+  it('reads the weigh-ins in any order', () => {
+    const n = findNudges({ ...base, weights: rising }).find((x) => x.id.startsWith('pace-'))!;
+    expect(n.title).toBe('Weight going up while losing fat');
+    expect(findNudges({ ...base, weights: [...rising].reverse() }).find((x) => x.id.startsWith('pace-'))!.title).toBe(n.title);
+  });
+
+  it('draws the rate against the goal\'s pace, with the goal on the side it was set', () => {
+    const v = findNudges({ ...base, weights: rising }).find((x) => x.id.startsWith('pace-'))!.visual!;
+    expect(v.heading).toBe('Weight rising');
+    expect(v.picture).toMatchObject({ kind: 'pace', goalKgPerWeek: -0.5 });
+    expect(v.picture!.kind === 'pace' && v.picture!.kgPerWeek).toBeGreaterThan(0.1);
+  });
 });

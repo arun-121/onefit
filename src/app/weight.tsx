@@ -3,8 +3,9 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
 import { Alert, Keyboard, Pressable, StyleSheet, TextInput, View, type TextInputInstance } from 'react-native';
 
-import { changeSincePrevious, dayWords, keepUnits, startingWeightKg, TREND_ICONS, WEIGHT_RANGE_HINT } from '@/components/screen-text';
-import { Sheet, SheetHeader, useValueColor, ValueBox } from '@/components/sheet-parts';
+import { DeltaChip } from '@/components/glance';
+import { dayWords, keepUnits, startingWeightKg, WEIGHT_RANGE_HINT, weightChange } from '@/components/screen-text';
+import { Note, Sheet, SheetHeader, useValueColor, ValueBox } from '@/components/sheet-parts';
 import { useSnackbar } from '@/components/snackbar';
 import { AppText, Button, Icon, useNumberText, type IconName } from '@/components/ui';
 import { Alpha, EmphasizedWeight, Shape, Spacing, Type, withAlpha } from '@/constants/theme';
@@ -59,6 +60,7 @@ function WeightForm({
   const showSnack = useSnackbar();
   const { colors } = useTheme();
   const on = useValueColor('primary');
+  const goalKg = useLiveQuery(getSettings, []).weightGoalKg;
 
   // What the sheet opened on. Saving or deleting changes `existing` a moment before the sheet
   // closes; the title and buttons should not flip under the owner's thumb while it does.
@@ -100,9 +102,11 @@ function WeightForm({
 
   const kg = roundKg(value);
   const valid = isValidWeightKg(kg);
-  const change = valid ? changeSincePrevious(kg, previous, today) : null;
-  // Under the number: the change from the weigh-in before, or what is missing. Each version fits
-  // one line at the default font size, so typing never moves the Save button underneath.
+  // Toward the target is the one change the chip fills; any other is a quiet chip, never red.
+  const change = valid ? weightChange(kg, previous, today, goalKg) : null;
+  // Under the number: the change from the weigh-in before as a chip and a short line, or what is
+  // missing. Each version fits one line at the default font size, so typing never moves the Save
+  // button underneath.
   let status: { icon: IconName; text: string; color: string };
   if (!valid) {
     // Too high cannot be fixed by typing on, so it is an error. Too low is usually a number that
@@ -112,7 +116,7 @@ function WeightForm({
         ? { icon: 'alert-circle-outline', text: WEIGHT_RANGE_HINT, color: colors.error }
         : { icon: 'information-outline', text: WEIGHT_RANGE_HINT, color: colors.onSurfaceVariant };
   } else if (change) {
-    status = { icon: TREND_ICONS[change.direction], text: change.text, color: colors.onSurfaceVariant };
+    status = { icon: 'information-outline', text: change.text, color: colors.onSurfaceVariant };
   } else {
     status = {
       icon: 'information-outline',
@@ -265,16 +269,29 @@ function WeightForm({
           style={styles.status}
           accessible
           accessibilityLiveRegion="polite"
-          accessibilityLabel={`${valid ? `${kg.toFixed(1)} kilograms. ` : ''}${status.text}`}>
-          <Icon name={status.icon} size={20} color={status.color} />
-          <AppText variant="bodyMedium" color={status.color} textBreakStrategy="balanced" style={styles.statusText}>
-            {keepUnits(status.text)}
-          </AppText>
+          accessibilityLabel={`${valid ? `${kg.toFixed(1)} kilograms. ` : ''}${status.text}${change?.towardGoal ? ', toward your target' : ''}`}>
+          {change ? (
+            <>
+              <DeltaChip direction={change.direction} amount={change.amount} towardGoal={change.towardGoal} />
+              <AppText variant="bodyMedium" color={colors.onSurfaceVariant} numberOfLines={1} style={styles.statusText}>
+                {keepUnits(change.since)}
+              </AppText>
+            </>
+          ) : (
+            <>
+              <Icon name={status.icon} size={20} color={status.color} />
+              <AppText variant="bodyMedium" color={status.color} textBreakStrategy="balanced" style={styles.statusText}>
+                {keepUnits(status.text)}
+              </AppText>
+            </>
+          )}
         </View>
         {opened.fromHealth ? (
-          <AppText variant="bodySmall" color={colors.onSurfaceVariant} textBreakStrategy="balanced" style={styles.note}>
-            This weigh-in came from another app through Health Connect. Saving replaces it with your number.
-          </AppText>
+          <View accessible accessibilityLabel="This weigh-in came from another app through Health Connect. Saving replaces it with your number.">
+            <Note icon="heart-pulse" style={styles.note}>
+              From another app. Saving replaces it.
+            </Note>
+          </View>
         ) : null}
       </View>
 
@@ -308,7 +325,8 @@ const styles = StyleSheet.create({
     fontWeight: EmphasizedWeight.displayMedium,
     fontVariant: ['tabular-nums'],
   },
-  status: { flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.sm, paddingHorizontal: Spacing.lg },
+  // A chip and its words, or an icon and a hint; 28dp at least, so the line does not move as it switches.
+  status: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, minHeight: 28, paddingHorizontal: Spacing.lg },
   statusText: { flex: 1 },
   note: { paddingHorizontal: Spacing.lg },
 });

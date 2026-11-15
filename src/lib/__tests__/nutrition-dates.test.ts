@@ -35,6 +35,11 @@ describe('nutrition', () => {
     expect(calculateTargets({ ...profile, goal: 'recomp' })).toMatchObject({ calories: near(burn * 0.9), protein: 165 });
   });
 
+  it('treats a goal it does not know as maintain instead of giving NaN', () => {
+    const t = calculateTargets({ ...profile, goal: 'lose' as never });
+    expect(t).toEqual(calculateTargets({ ...profile, goal: 'maintain' }));
+  });
+
   it('holds the pace to what each goal allows', () => {
     expect(goalRateKg({ goal: 'lose_fat', rateKg: 3 })).toBe(1);
     expect(goalRateKg({ goal: 'build_muscle', rateKg: 2 })).toBe(0.5);
