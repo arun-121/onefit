@@ -14,6 +14,7 @@ import { Platform } from 'react-native';
 import { VOICE_LOGGING } from '@/constants/features';
 import { addDays, dateKeyToDate, todayKey } from './dates';
 import { getMealsLoggedOn, getWeightsBetween, kvGet, kvSet } from './db';
+import { nudgeForTomorrow } from './nudges-data';
 import {
   anyReminderEnabled,
   DAYS_AHEAD,
@@ -94,6 +95,44 @@ const COME_BACK_COPY: Record<ComeBackAbout, { title: string; body: string }> = {
 
 const comeBackId = (about: ComeBackAbout, date: string) => `${COME_BACK_PREFIX[about]}${date}`;
 
+// ---- heads up: at most one notification, the next morning, about something the app noticed.
+export const HEADS_UP_CHANNEL = 'heads-up';
+const HEADS_UP_PREFIX = 'headsup-';
+const HEADS_UP_HOUR = 9;
+
+/**
+ * Schedule tomorrow morning's heads-up, replacing any before it: the most important thing the
+ * rules will say tomorrow that the owner has not already seen. Run whenever the data changes.
+ */
+let headsUpQueue: Promise<void> = Promise.resolve();
+export function refreshHeadsUp(): Promise<void> {
+  // Queued, so two quick changes cannot each leave a different heads-up scheduled.
+  headsUpQueue = headsUpQueue.then(() => scheduleHeadsUp(new Date()));
+  return headsUpQueue;
+}
+
+async function scheduleHeadsUp(now: Date): Promise<void> {
+  try {
+    const scheduled = await Notifications.getAllScheduledNotificationsAsync();
+    await Promise.all(
+      scheduled.filter((n) => n.identifier.startsWith(HEADS_UP_PREFIX)).map((n) => Notifications.cancelScheduledNotificationAsync(n.identifier)),
+    );
+    if (!getSettings().headsUpNotifications || !(await hasNotificationPermission())) return;
+    const today = todayKey(now);
+    const nudge = nudgeForTomorrow(today);
+    if (!nudge) return;
+    const at = dateKeyToDate(addDays(today, 1));
+    at.setHours(HEADS_UP_HOUR, 0, 0, 0);
+    await Notifications.scheduleNotificationAsync({
+      identifier: `${HEADS_UP_PREFIX}${nudge.id}`,
+      content: { title: nudge.title, body: nudge.body, data: { kind: 'heads-up', id: nudge.id } },
+      trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: at, channelId: HEADS_UP_CHANNEL },
+    });
+  } catch (e) {
+    console.warn('Could not schedule the heads-up', e);
+  }
+}
+
 export async function setupNotifications() {
   Notifications.setNotificationHandler({
     handleNotification: async () => ({
@@ -112,6 +151,11 @@ export async function setupNotifications() {
     await Notifications.setNotificationChannelAsync(WEIGH_IN_CHANNEL, {
       name: 'Weigh-in reminder',
       description: 'A daily reminder to log your weight',
+      importance: AndroidImportance.DEFAULT,
+    });
+    await Notifications.setNotificationChannelAsync(HEADS_UP_CHANNEL, {
+      name: 'Heads up',
+      description: 'Something the app noticed in your logs: an unusual day, a gap, a new best',
       importance: AndroidImportance.DEFAULT,
     });
   }

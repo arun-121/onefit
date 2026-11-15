@@ -41,11 +41,17 @@ import {
   writeWeight,
   type HealthGrants,
 } from './health';
-import { cancelReminder, cancelWeighInReminder, keepRemindersAhead, rescheduleReminders } from './reminders';
+import { cancelReminder, cancelWeighInReminder, keepRemindersAhead, refreshHeadsUp, rescheduleReminders } from './reminders';
 import { getSettings, updateSettings, type Settings } from './settings';
 import type { Entry, EntrySource, Exercise, FoodItem, Meal, NewExercise, SavedFood, WeightEntry } from './types';
 import { isValidWeightKg, planWeightImport, roundKg, type WeightImport } from './weight';
 import { refreshWidgets } from '../widget/refresh';
+
+/** Every change to the logs: screens re-read, and tomorrow's heads-up is worked out again. */
+function changed() {
+  notifyChanged();
+  void refreshHeadsUp();
+}
 
 /** How far back to backfill Health Connect when it is switched on or the app opens. */
 const HEALTH_BACKFILL_DAYS = 7;
@@ -89,7 +95,7 @@ export async function logFoods({ date, meal, items, source }: LogInput): Promise
 
   const entries = insertEntries(date, meal, clean, source);
   clean.forEach((item) => recordFoodUse(item));
-  notifyChanged();
+  changed();
 
   // A log from the widget may be the only sign of life for days, so the first one each day also
   // rebuilds the reminders: the week ahead stays covered and the come-back reminders move on.
@@ -121,7 +127,7 @@ export async function editEntry(id: number, patch: Partial<FoodItem> & { meal?: 
   const after = updateEntry(id, patch);
   if (!before || !after) return null;
   recordFoodUse(after, Date.now(), false);
-  notifyChanged();
+  changed();
 
   if (getSettings().healthConnectEnabled) {
     await removeFromHealth(before.hcRecordId);
@@ -135,7 +141,7 @@ export async function editEntry(id: number, patch: Partial<FoodItem> & { meal?: 
 export async function deleteEntries(ids: readonly number[]): Promise<Entry[]> {
   const removed = ids.map((id) => deleteEntryRow(id)).filter((e): e is Entry => e !== null);
   if (removed.length === 0) return [];
-  notifyChanged();
+  changed();
   for (const e of removed) await removeFromHealth(e.hcRecordId);
   await refreshWidgets();
   // A meal may be empty again, so its reminder should come back.
@@ -161,7 +167,7 @@ async function writeExercisesToHealth(exercises: Exercise[]) {
 export async function logExercise(input: NewExercise): Promise<Exercise | null> {
   const ex = insertExercise({ ...input, minutes: Math.max(1, Math.round(input.minutes)), calories: Math.max(0, Math.round(input.calories)) });
   if (!ex) return null;
-  notifyChanged();
+  changed();
   await Promise.allSettled([writeExercisesToHealth([ex]), refreshWidgets()]);
   return ex;
 }
@@ -171,7 +177,7 @@ export async function editExercise(id: number, patch: Partial<NewExercise>): Pro
   const before = getExercise(id);
   const after = updateExerciseRow(id, patch);
   if (!before || !after) return null;
-  notifyChanged();
+  changed();
   if (getSettings().healthConnectEnabled) {
     try {
       await deleteExerciseRecords(before.hcSessionId, before.hcCaloriesId);
@@ -188,7 +194,7 @@ export async function editExercise(id: number, patch: Partial<NewExercise>): Pro
 export async function deleteExercise(id: number): Promise<void> {
   const removed = deleteExerciseRow(id);
   if (!removed) return;
-  notifyChanged();
+  changed();
   try {
     await deleteExerciseRecords(removed.hcSessionId, removed.hcCaloriesId);
   } catch (e) {
@@ -289,7 +295,7 @@ export async function logWeight(date: string, kg: number): Promise<WeightEntry |
   if (!saved) return null;
   setWeightDismissed(date, false);
   applyLatestWeight();
-  notifyChanged();
+  changed();
 
   await removeWeightFromHealth(before);
   await Promise.allSettled([
@@ -310,7 +316,7 @@ export async function deleteWeight(date: string): Promise<WeightEntry | null> {
   // A weigh-in read from another app would come straight back on the next sync otherwise.
   if (removed.source === 'health') setWeightDismissed(date, true);
   applyLatestWeight();
-  notifyChanged();
+  changed();
 
   await removeWeightFromHealth(removed);
   await refreshWidgets();
@@ -341,7 +347,7 @@ export async function restoreWeight(removed: WeightEntry): Promise<WeightEntry |
   if (!saved) return null;
   setWeightDismissed(removed.date, false);
   applyLatestWeight();
-  notifyChanged();
+  changed();
 
   await Promise.allSettled([
     refreshWidgets(),
@@ -373,7 +379,7 @@ export async function importHealthWeights(grants?: HealthGrants | null): Promise
   if (imports.length === 0) return 0;
   for (const w of imports) upsertWeight(w.date, w.kg, 'health', Date.now(), w.recordId);
   applyLatestWeight();
-  notifyChanged();
+  changed();
   if (imports.some((w) => w.date === today)) await cancelWeighInReminder(today);
   return imports.length;
 }

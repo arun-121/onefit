@@ -2,7 +2,7 @@ import type { Macros } from './types';
 
 export type Sex = 'male' | 'female';
 export type ActivityLevel = 'sedentary' | 'light' | 'moderate' | 'active' | 'very_active';
-export type GoalType = 'lose' | 'lose_slow' | 'maintain' | 'gain';
+export type GoalType = 'lose_fat' | 'build_muscle' | 'recomp' | 'maintain';
 
 export interface Profile {
   sex: Sex;
@@ -11,6 +11,8 @@ export interface Profile {
   weightKg: number;
   activity: ActivityLevel;
   goal: GoalType;
+  /** Kilograms a week to lose (lose_fat) or gain (build_muscle). Left out, the goal's usual pace. */
+  rateKg?: number;
 }
 
 export const ACTIVITY_LABELS: Record<ActivityLevel, string> = {
@@ -22,11 +24,31 @@ export const ACTIVITY_LABELS: Record<ActivityLevel, string> = {
 };
 
 export const GOAL_LABELS: Record<GoalType, string> = {
-  lose: 'Lose ~0.5 kg a week',
-  lose_slow: 'Lose ~0.25 kg a week',
+  lose_fat: 'Lose fat',
+  build_muscle: 'Build muscle',
+  recomp: 'Lose fat, build muscle',
   maintain: 'Maintain weight',
-  gain: 'Gain slowly',
 };
+
+/** The weekly pace each goal can be set to, in kg, and where it starts. Goals without a pace have none. */
+export const GOAL_RATES: Partial<Record<GoalType, { min: number; max: number; usual: number }>> = {
+  lose_fat: { min: 0.1, max: 1, usual: 0.5 },
+  build_muscle: { min: 0.1, max: 0.5, usual: 0.25 },
+};
+
+/** Protein for each goal, in grams per kg of body weight: more when eating under what you burn, to keep muscle. */
+const PROTEIN_PER_KG: Record<GoalType, number> = {
+  lose_fat: 2,
+  build_muscle: 2,
+  recomp: 2.2,
+  maintain: 1.6,
+};
+
+/** Roughly the energy in a kilogram of body weight change, spread over a week. */
+const KCAL_PER_KG_WEEK = 7700 / 7;
+
+/** Losing fat while building muscle eats this share under what you burn. */
+const RECOMP_DEFICIT = 0.1;
 
 const ACTIVITY_FACTOR: Record<ActivityLevel, number> = {
   sedentary: 1.2,
@@ -34,13 +56,6 @@ const ACTIVITY_FACTOR: Record<ActivityLevel, number> = {
   moderate: 1.55,
   active: 1.725,
   very_active: 1.9,
-};
-
-const GOAL_ADJUSTMENT: Record<GoalType, number> = {
-  lose: -500,
-  lose_slow: -250,
-  maintain: 0,
-  gain: 300,
 };
 
 /** Never suggest a target below this; very low intakes need medical supervision. */
@@ -58,17 +73,65 @@ export function tdee(p: Profile): number {
 
 export type Targets = Macros;
 
+/** The weekly pace a profile's goal works to, held to the goal's range; 0 for goals without one. */
+export function goalRateKg(p: Pick<Profile, 'goal' | 'rateKg'>): number {
+  const range = GOAL_RATES[p.goal];
+  if (!range) return 0;
+  const rate = p.rateKg !== undefined && Number.isFinite(p.rateKg) && p.rateKg > 0 ? p.rateKg : range.usual;
+  return Math.min(range.max, Math.max(range.min, rate));
+}
+
+/** Calories a day the goal adds to (positive) or takes from (negative) what the profile burns. */
+export function goalAdjustment(p: Profile): number {
+  switch (p.goal) {
+    case 'lose_fat':
+      return -goalRateKg(p) * KCAL_PER_KG_WEEK;
+    case 'build_muscle':
+      return goalRateKg(p) * KCAL_PER_KG_WEEK;
+    case 'recomp':
+      return -RECOMP_DEFICIT * tdee(p);
+    case 'maintain':
+      return 0;
+  }
+}
+
+/** Grams of protein per kg of body weight for a goal. */
+export function proteinPerKg(goal: GoalType): number {
+  return PROTEIN_PER_KG[goal];
+}
+
 /**
- * Daily targets from a profile: calories from TDEE plus the goal adjustment,
- * protein at 1.6 g per kg, fat at 25% of calories, carbs fill the rest.
+ * Daily targets from a profile: calories from TDEE plus the goal's adjustment, protein by goal
+ * (1.6 to 2.2 g per kg), fat at 25% of calories, carbs fill the rest.
  */
 export function calculateTargets(p: Profile): Targets {
-  const raw = tdee(p) + GOAL_ADJUSTMENT[p.goal];
-  const calories = Math.max(MIN_CALORIE_TARGET, Math.round(raw / 10) * 10);
-  const protein = Math.round(1.6 * p.weightKg);
+  return splitTargets(tdee(p) + goalAdjustment(p), p.goal, p.weightKg);
+}
+
+/** Calories (to the nearest 10, never under the floor) split into macros for a goal and a body weight. */
+export function splitTargets(rawCalories: number, goal: GoalType, weightKg: number): Targets {
+  const calories = Math.max(MIN_CALORIE_TARGET, Math.round(rawCalories / 10) * 10);
+  const protein = Math.round(PROTEIN_PER_KG[goal] * weightKg);
   const fat = Math.round((calories * 0.25) / 9);
   const carbs = Math.max(0, Math.round((calories - protein * 4 - fat * 9) / 4));
   return { calories, protein, carbs, fat };
+}
+
+/**
+ * The calories a goal adds to or takes from a measured burn rather than the formula's: the same as
+ * `goalAdjustment`, except that losing fat while building muscle is 10% under the measured figure.
+ */
+export function goalAdjustmentFrom(burnKcal: number, p: Pick<Profile, 'goal' | 'rateKg'>): number {
+  switch (p.goal) {
+    case 'lose_fat':
+      return -goalRateKg(p) * KCAL_PER_KG_WEEK;
+    case 'build_muscle':
+      return goalRateKg(p) * KCAL_PER_KG_WEEK;
+    case 'recomp':
+      return -RECOMP_DEFICIT * burnKcal;
+    case 'maintain':
+      return 0;
+  }
 }
 
 export function sumMacros(items: readonly Macros[]): Macros {

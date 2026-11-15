@@ -11,7 +11,7 @@ import { ScrollView, StyleSheet, View } from 'react-native';
 
 import { Alpha, Shape, Spacing, TOUCH_TARGET, withAlpha } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
-import { ACTIVITIES, formatMinutes, INTENSITY_LABELS } from '@/lib/exercise';
+import { ACTIVITIES, exerciseDetailLine, exerciseTitle } from '@/lib/exercise';
 import type { Streak, TodaySummary } from '@/lib/insights';
 import { formatKcal, sumMacros } from '@/lib/nutrition';
 import { MEAL_LABELS, MEALS, type Entry, type Exercise, type Meal, type SavedFood, type WeightEntry } from '@/lib/types';
@@ -148,7 +148,7 @@ export function WeightExerciseTiles({ summary, today, exercises }: { summary: To
   const { colors } = useTheme();
   const weight = weightTileText(summary.weight, today);
   const exercise = exerciseTileText(
-    exercises.map((ex) => ({ activity: ACTIVITIES[ex.activity].label, minutes: ex.minutes, calories: ex.calories })),
+    exercises.map((ex) => ({ activity: exerciseTitle(ex), minutes: ex.minutes, calories: ex.calories })),
   );
   // The latest workout's own icon once there is one.
   const latest = exercises.length > 0 ? exercises[exercises.length - 1] : null;
@@ -277,15 +277,15 @@ export function ExerciseSection({
           key={ex.id}
           icon={ACTIVITIES[ex.activity].icon as IconName}
           tone="tertiary"
-          headline={ACTIVITIES[ex.activity].label}
-          supporting={`${formatMinutes(ex.minutes)}, ${INTENSITY_LABELS[ex.intensity].toLowerCase()}`}
+          headline={exerciseTitle(ex)}
+          supporting={exerciseDetailLine(ex)}
           trailing={
             <AppText variant="labelLarge" tabular color={colors.tertiary}>
               {`+${formatKcal(ex.calories)} kcal`}
             </AppText>
           }
           onPress={() => open(ex.id)}
-          accessibilityLabel={`${ACTIVITIES[ex.activity].label}, ${formatMinutes(ex.minutes)}, ${Math.round(ex.calories)} calories. Edit`}
+          accessibilityLabel={`${exerciseTitle(ex)}, ${exerciseDetailLine(ex)}, ${Math.round(ex.calories)} calories. Edit`}
         />
       ))}
       {showAdd ? (

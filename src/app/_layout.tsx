@@ -17,6 +17,7 @@ import {
   isComeBackReminderData,
   isReminderData,
   isWeighInReminderData,
+  refreshHeadsUp,
   rescheduleReminders,
   setupNotifications,
   WEIGH_IN_ROUTE,
@@ -35,6 +36,7 @@ function onForeground() {
   refreshScheme();
   notifyChanged();
   void rescheduleReminders();
+  void refreshHeadsUp();
   void refreshWidgets();
   void syncHealthBackfill();
 }

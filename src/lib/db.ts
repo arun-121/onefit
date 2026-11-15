@@ -101,6 +101,15 @@ const MIGRATIONS: Migration[] = [
     hc_record_id TEXT
   );
   `,
+  // Workouts logged by describing them keep what they were called and what was done.
+  `
+  ALTER TABLE exercises ADD COLUMN name TEXT NOT NULL DEFAULT '';
+  ALTER TABLE exercises ADD COLUMN details TEXT NOT NULL DEFAULT '';
+  ALTER TABLE exercises ADD COLUMN sets INTEGER;
+  ALTER TABLE exercises ADD COLUMN reps INTEGER;
+  ALTER TABLE exercises ADD COLUMN load_kg REAL;
+  ALTER TABLE exercises ADD COLUMN met REAL;
+  `,
 ];
 
 function migrate(database: SQLiteDatabase) {
@@ -268,6 +277,18 @@ export function getTopFoods(fromDate: string, toDate: string, limit = 25): FoodC
   );
 }
 
+/** The foods that brought the most protein between two dates inclusive, grouped by name. */
+export function getTopProteinFoods(fromDate: string, toDate: string, limit = 8): { name: string; protein: number; count: number }[] {
+  return getDb().getAllSync<{ name: string; protein: number; count: number }>(
+    `SELECT MIN(name) AS name, SUM(protein) AS protein, COUNT(*) AS count FROM entries
+      WHERE date BETWEEN ? AND ? AND protein > 0
+      GROUP BY LOWER(TRIM(name)) ORDER BY protein DESC, count DESC LIMIT ?`,
+    fromDate,
+    toDate,
+    limit,
+  );
+}
+
 /** Every food entry, oldest first (for the backup file). */
 export function getAllEntries(): Entry[] {
   return getDb().getAllSync<EntryRow>('SELECT * FROM entries ORDER BY id').map(toEntry);
@@ -351,6 +372,12 @@ interface ExerciseRow {
   created_at: number;
   hc_session_id: string | null;
   hc_calories_id: string | null;
+  name: string | null;
+  details: string | null;
+  sets: number | null;
+  reps: number | null;
+  load_kg: number | null;
+  met: number | null;
 }
 
 function toExercise(r: ExerciseRow): Exercise {
@@ -364,6 +391,12 @@ function toExercise(r: ExerciseRow): Exercise {
     createdAt: r.created_at,
     hcSessionId: r.hc_session_id,
     hcCaloriesId: r.hc_calories_id,
+    name: r.name ?? '',
+    details: r.details ?? '',
+    sets: r.sets ?? null,
+    reps: r.reps ?? null,
+    loadKg: r.load_kg ?? null,
+    met: r.met ?? null,
   };
 }
 
@@ -430,13 +463,20 @@ export function getAllExercises(): Exercise[] {
 
 export function insertExercise(input: NewExercise, now: number = Date.now()): Exercise | null {
   const res = getDb().runSync(
-    'INSERT INTO exercises (date, activity, minutes, intensity, calories, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+    `INSERT INTO exercises (date, activity, minutes, intensity, calories, created_at, name, details, sets, reps, load_kg, met)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     input.date,
     input.activity,
     input.minutes,
     input.intensity,
     input.calories,
     now,
+    input.name ?? '',
+    input.details ?? '',
+    input.sets ?? null,
+    input.reps ?? null,
+    input.loadKg ?? null,
+    input.met ?? null,
   );
   return getExercise(res.lastInsertRowId);
 }
@@ -446,11 +486,17 @@ export function updateExerciseRow(id: number, patch: Partial<NewExercise>): Exer
   if (!current) return null;
   const next = { ...current, ...patch };
   getDb().runSync(
-    'UPDATE exercises SET activity = ?, minutes = ?, intensity = ?, calories = ? WHERE id = ?',
+    'UPDATE exercises SET activity = ?, minutes = ?, intensity = ?, calories = ?, name = ?, details = ?, sets = ?, reps = ?, load_kg = ?, met = ? WHERE id = ?',
     next.activity,
     next.minutes,
     next.intensity,
     next.calories,
+    next.name ?? '',
+    next.details ?? '',
+    next.sets ?? null,
+    next.reps ?? null,
+    next.loadKg ?? null,
+    next.met ?? null,
     id,
   );
   return getExercise(id);
@@ -724,10 +770,13 @@ export function replaceAllData(data: AllData): void {
       (f) => [f.id, foodKey(f.name, f.portion), f.name, f.portion, f.calories, f.protein, f.carbs, f.fat, f.pinned ? 1 : 0, f.useCount, f.lastUsedAt],
     );
     insertAll(
-      `INSERT INTO exercises (id, date, activity, minutes, intensity, calories, created_at, hc_session_id, hc_calories_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO exercises (id, date, activity, minutes, intensity, calories, created_at, hc_session_id, hc_calories_id, name, details, sets, reps, load_kg, met)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       data.exercises,
-      (x) => [x.id, x.date, x.activity, x.minutes, x.intensity, x.calories, x.createdAt, x.hcSessionId, x.hcCaloriesId],
+      (x) => [
+        x.id, x.date, x.activity, x.minutes, x.intensity, x.calories, x.createdAt, x.hcSessionId, x.hcCaloriesId,
+        x.name ?? '', x.details ?? '', x.sets ?? null, x.reps ?? null, x.loadKg ?? null, x.met ?? null,
+      ],
     );
     insertAll(
       'INSERT INTO weights (id, date, kg, source, created_at, hc_record_id) VALUES (?, ?, ?, ?, ?, ?)',

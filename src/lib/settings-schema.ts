@@ -46,6 +46,10 @@ export interface Settings {
    * about this phone, not a choice: a backup never carries it and a restore never changes it.
    */
   notificationsAsked: boolean;
+  /** The day of the last weekly check-in, taken or put off. Null before the first one. */
+  lastCheckInDate: string | null;
+  /** A morning notification when the app notices something (see `nudges.ts`). */
+  headsUpNotifications: boolean;
 }
 
 /** The settings a backup carries: everything except what only this phone can know. */
@@ -78,11 +82,19 @@ export const DEFAULT_SETTINGS: Settings = {
   weighInReminder: { enabled: false, hour: 8, minute: 0 },
   targetsWeightKg: null,
   notificationsAsked: false,
+  lastCheckInDate: null,
+  headsUpNotifications: true,
 };
 
 const SEXES: readonly Sex[] = ['male', 'female'];
 const ACTIVITY_LEVELS: readonly ActivityLevel[] = ['sedentary', 'light', 'moderate', 'active', 'very_active'];
-const GOAL_TYPES: readonly GoalType[] = ['lose', 'lose_slow', 'maintain', 'gain'];
+const GOAL_TYPES: readonly GoalType[] = ['lose_fat', 'build_muscle', 'recomp', 'maintain'];
+/** Goals saved before goals had a pace you set, and what each one became. */
+const OLD_GOALS: Readonly<Record<string, { goal: GoalType; rateKg?: number }>> = {
+  lose: { goal: 'lose_fat', rateKg: 0.5 },
+  lose_slow: { goal: 'lose_fat', rateKg: 0.25 },
+  gain: { goal: 'build_muscle', rateKg: 0.25 },
+};
 const REMINDER_MEAL_KEYS: readonly ReminderMeal[] = ['breakfast', 'lunch', 'dinner'];
 
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -121,7 +133,7 @@ export function readSettings(raw: unknown, problems?: string[]): Settings {
   amount('carbsGoal', 'carbs goal');
   amount('fatGoal', 'fat goal');
 
-  const flag = (key: 'countExerciseCalories' | 'remindersEnabled' | 'healthConnectEnabled', label: string) => {
+  const flag = (key: 'countExerciseCalories' | 'remindersEnabled' | 'healthConnectEnabled' | 'headsUpNotifications', label: string) => {
     if (!has(key)) return;
     const v = src[key];
     if (typeof v === 'boolean') out[key] = v;
@@ -129,6 +141,7 @@ export function readSettings(raw: unknown, problems?: string[]): Settings {
   };
   flag('countExerciseCalories', 'counting activity from other apps');
   flag('remindersEnabled', 'meal reminders');
+  flag('headsUpNotifications', 'heads-up notifications');
   flag('healthConnectEnabled', 'Health Connect syncing');
 
   const text = (key: 'textModel' | 'speechModel', label: string) => {
@@ -180,15 +193,18 @@ export function readSettings(raw: unknown, problems?: string[]): Settings {
       isAmount(p.heightCm) &&
       isAmount(p.weightKg) &&
       ACTIVITY_LEVELS.includes(p.activity as ActivityLevel) &&
-      GOAL_TYPES.includes(p.goal as GoalType)
+      (GOAL_TYPES.includes(p.goal as GoalType) || (typeof p.goal === 'string' && p.goal in OLD_GOALS))
     ) {
+      const goal = GOAL_TYPES.includes(p.goal as GoalType) ? { goal: p.goal as GoalType } : OLD_GOALS[p.goal as string];
+      const rateKg = isPositive(p.rateKg) ? p.rateKg : goal.rateKg;
       out.profile = {
         sex: p.sex as Sex,
         age: p.age,
         heightCm: p.heightCm,
         weightKg: p.weightKg,
         activity: p.activity as ActivityLevel,
-        goal: p.goal as GoalType,
+        goal: goal.goal,
+        ...(rateKg !== undefined ? { rateKg } : {}),
       };
     } else bad('the profile used to work out targets is incomplete');
   }
@@ -206,6 +222,11 @@ export function readSettings(raw: unknown, problems?: string[]): Settings {
   if (has('goalStartDate') && src.goalStartDate !== null) {
     if (isDateKey(src.goalStartDate)) out.goalStartDate = src.goalStartDate;
     else bad('the date the target weight was set is not a real day');
+  }
+
+  if (has('lastCheckInDate') && src.lastCheckInDate !== null) {
+    if (isDateKey(src.lastCheckInDate)) out.lastCheckInDate = src.lastCheckInDate;
+    else bad('the date of the last check-in is not a real day');
   }
 
   // About this phone, so never a reason to turn a backup away: anything but a clear yes is a no.

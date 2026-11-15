@@ -6,9 +6,10 @@ import type { ImageSourcePropType } from 'react-native';
 import { withAlpha } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 
-const TAB_SYMBOLS: Record<'today' | 'progress' | 'settings', AndroidSymbol> = {
+const TAB_SYMBOLS: Record<'today' | 'progress' | 'assistant' | 'settings', AndroidSymbol> = {
   today: 'today',
   progress: 'monitoring',
+  assistant: 'auto_awesome',
   settings: 'settings',
 };
 
@@ -53,6 +54,10 @@ export default function TabsLayout() {
       <NativeTabs.Trigger name="progress">
         <NativeTabs.Trigger.Label>Progress</NativeTabs.Trigger.Label>
         {icons.progress ? <NativeTabs.Trigger.Icon src={icons.progress} renderingMode="template" /> : null}
+      </NativeTabs.Trigger>
+      <NativeTabs.Trigger name="assistant">
+        <NativeTabs.Trigger.Label>Assistant</NativeTabs.Trigger.Label>
+        {icons.assistant ? <NativeTabs.Trigger.Icon src={icons.assistant} renderingMode="template" /> : null}
       </NativeTabs.Trigger>
       <NativeTabs.Trigger name="settings">
         <NativeTabs.Trigger.Label>Settings</NativeTabs.Trigger.Label>

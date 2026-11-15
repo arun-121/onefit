@@ -21,7 +21,7 @@ const TODAY = '2026-11-30';
 const FROM_30 = '2026-11-01';
 const day = (offsetFromStart: number, start: string = FROM_30) => addDays(start, offsetFromStart);
 
-const profile: Profile = { sex: 'male', age: 30, heightCm: 175, weightKg: 78, activity: 'moderate', goal: 'lose' };
+const profile: Profile = { sex: 'male', age: 30, heightCm: 175, weightKg: 78, activity: 'moderate', goal: 'lose_fat' };
 
 function input(over: Partial<InsightsInput> = {}): InsightsInput {
   return {

@@ -31,10 +31,25 @@ export const ACTIVITIES: Record<Activity, { label: string; icon: string; met: Re
 export const DEFAULT_WEIGHT_KG = 70;
 
 export function estimateBurn(activity: Activity, intensity: Intensity, minutes: number, weightKg: number): number {
-  const met = ACTIVITIES[activity].met[intensity];
+  return burnFromMet(ACTIVITIES[activity].met[intensity], minutes, weightKg);
+}
+
+/** Active calories for a MET held for `minutes`: (MET − 1) × kg × hours. */
+export function burnFromMet(met: number, minutes: number, weightKg: number): number {
   const kg = weightKg > 0 ? weightKg : DEFAULT_WEIGHT_KG;
   const hours = Math.max(0, minutes) / 60;
   return Math.max(0, Math.round((met - 1) * kg * hours));
+}
+
+/** A workout's name: what the owner called it, or the activity's label for one logged by picking. */
+export function exerciseTitle(ex: { activity: Activity; name?: string }): string {
+  return ex.name?.trim() || ACTIVITIES[ex.activity]?.label || 'Workout';
+}
+
+/** The line under a workout's name: what was done, then how long. */
+export function exerciseDetailLine(ex: { details?: string; minutes: number; intensity: Intensity }): string {
+  const what = ex.details?.trim();
+  return what ? `${what}, ${formatMinutes(ex.minutes)}` : `${formatMinutes(ex.minutes)}, ${INTENSITY_LABELS[ex.intensity].toLowerCase()}`;
 }
 
 export function formatMinutes(minutes: number): string {

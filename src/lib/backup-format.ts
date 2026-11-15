@@ -117,6 +117,15 @@ class RowCheck {
     return allowed[0];
   }
 
+  /** A number that may be left out (older backups, or nothing said): a figure of 0 or more, or null. */
+  optionalAmount(key: string, what: string): number | null {
+    const v = this.row[key];
+    if (v === undefined || v === null) return null;
+    if (typeof v === 'number' && Number.isFinite(v) && v >= 0) return v;
+    this.fail(`has ${what} not a number`);
+    return null;
+  }
+
   /** A Health Connect record id: text, or nothing. */
   recordId(key: string): string | null {
     const v = this.row[key];
@@ -242,6 +251,13 @@ export function validateBackup(raw: unknown): BackupCheck {
     createdAt: c.amount('createdAt', 'a time that is'),
     hcSessionId: c.recordId('hcSessionId'),
     hcCaloriesId: c.recordId('hcCaloriesId'),
+    // Added when workouts could be described; older backups have none of these.
+    name: c.text('name', 'name', false),
+    details: c.text('details', 'description', false),
+    sets: c.optionalAmount('sets', 'sets that are'),
+    reps: c.optionalAmount('reps', 'reps that are'),
+    loadKg: c.optionalAmount('loadKg', 'a weight lifted that is'),
+    met: c.optionalAmount('met', 'an effort (MET) that is'),
   }));
 
   const weighedOn = new Set<string>();

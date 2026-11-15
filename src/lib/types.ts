@@ -59,6 +59,17 @@ export interface NewExercise {
   intensity: import('./exercise').Intensity;
   /** Active calories burned (kcal). */
   calories: number;
+  /** What the owner called it ("Bench press"); empty for a workout logged by picking an activity. */
+  name?: string;
+  /** What was done ("4 × 10 at 60 kg", "5 km"); empty when nothing more was said. */
+  details?: string;
+  sets?: number | null;
+  /** Reps per set. */
+  reps?: number | null;
+  /** Weight lifted per rep, kg. */
+  loadKg?: number | null;
+  /** The MET the calories were worked out from, when the AI estimated them. */
+  met?: number | null;
 }
 
 export interface Exercise extends NewExercise {

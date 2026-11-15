@@ -23,7 +23,7 @@ what is missing and how to get it; never show a confident number built on three 
 | --- | --- | --- |
 | Morning | Weigh in (optional, about 5 seconds) | Weight tile on Today, or the weigh-in reminder |
 | Meals | Log food: type it and the AI estimates; one-tap favourites; same as yesterday | Today, meal sheet, widget, reminders |
-| After training | Log a workout (activity, minutes, intensity) | Exercise control on the Calories tile |
+| After training | Describe the workout ("bench press 4×10 at 60 kg, 20 min run"); the AI works out each exercise | Exercise tile or Log exercise |
 | Any time | See calories left, macros, streak | Today, widget |
 
 ## Data (SQLite, on the phone only)
@@ -273,6 +273,85 @@ more weigh-ins over at least 2 weeks with meals logged in between, patterns afte
   saves. − and + step 0.1 kg and repeat while held. Save, and Delete when that day already has
   an entry.
 - The day view shows that day's weight when there is one.
+
+## Personal assistant (like MacroFactor, but local)
+
+The owner's words: "this app should be more like my personal fitness assistant, the food I log should
+give me insights", "something like MacroFactor, but everything local, and API call based LLM calling".
+All data stays in SQLite on the phone. The only network calls are to Groq, with the owner's key.
+
+- **Goals** (Settings, "Work out my targets"): Lose fat, Build muscle, Lose fat while building muscle
+  (recomposition), Maintain weight. Lose fat (0.1 to 1 kg a week) and Build muscle (0.1 to 0.5 kg a week)
+  take a pace the owner types; 1 kg a week is about 1,100 kcal a day. Lose fat while building muscle is 10%
+  under the burn. Protein is 2 g per kg for Lose fat and Build muscle, 2.2 g for Lose fat while building
+  muscle, and 1.6 g for Maintain weight. Fat is 25% of calories and carbs make up the rest, never under
+  1,200 kcal. Goals saved before this change convert: lose → Lose fat at 0.5, lose_slow → Lose fat at
+  0.25, gain → Build muscle at 0.25.
+- **Weekly check-in** (Today, once every 7 days): the targets are worked out again from what the
+  owner really burns (Progress's 30-day "What you actually burn", from logged food and the weight trend)
+  plus the goal's change, and the protein for the goal at the current weight. One check-in moves the
+  calorie target by at most 250 kcal. It is shown only with a goal, a weigh-in and a burn estimate of
+  fair or good confidence. A change under 50 kcal (and protein within 10 g) is "on track". "Update
+  targets" or "Not now" both wait a week, and both can be undone.
+- **Next step** (Today): one coach tip from today's numbers. It covers protein left with saved foods that
+  fit the calories left (most protein per calorie first, logged with one tap), a kind word about a day
+  over budget in the words of the goal, the surplus still to eat on a Build muscle evening, and a
+  protein-first start in the morning. It suggests only foods the owner has logged before.
+- **Assistant tab**: a chat with the text model from Settings. Each question sends a summary of the
+  data: goal and targets, today's entries, every 30-day Progress card (a card that is not ready goes as
+  its reason, never as a number), top foods by calories and by protein, two weeks of daily totals and
+  weigh-ins, and saved foods with portions. The model is told to use only those figures, to say what to
+  log when the data cannot answer, never to go under 1,200 kcal, and to send health questions to a
+  professional. The conversation (last 40 messages) is kept on the phone and is not in backups.
+
+## Heads up: the app speaks first
+
+The owner's words: "if this finds anything unusual, or any suggestions, proactiveness". Rules over
+the owner's own logs (`src/lib/nudges.ts`), no AI and no network. Each needs enough data and stays
+quiet otherwise. Days are named ("Saturday"), so a sentence stays true the next morning.
+
+| Rule | When | Says |
+| --- | --- | --- |
+| Missed day | Nothing logged yesterday, after 4 of the 7 days before were logged | Log it while it is fresh |
+| High day | Yesterday over the usual by 2 standard deviations of the last 30 full days (at least 7 of them), and 400 kcal over the goal | How far over, the biggest item, why one day does not move the trend |
+| Light day | Yesterday logged but under a full day | Add what was missed; for Build muscle, the surplus matters |
+| Protein low | 3 of the last 4 full days under 80% of the protein goal | The average and the owner's best protein foods |
+| Weigh-in jump | Latest weigh-in (today or yesterday) 1.2 kg or 1.5% from the 10 days before (3 or more weigh-ins) | Almost always water; the trend barely moves |
+| No weigh-in | A goal is set and 7 or more days since the last weigh-in | Check-ins need weigh-ins |
+| No workout | Build muscle or recomposition, 5 or more days since the last workout, 4 or more in the month before | Train 2 to 4 times a week, or log what was missed |
+| Pace off | A clear 30-day weight rate against the goal's pace: gaining over twice the pace, or going the wrong way | What the next check-in will do |
+| New best | A lift logged today or yesterday with a higher estimated one-rep max (weight × (1 + reps/30)) than any earlier session of it | The set, the old best, and the next step (+2.5 kg or one more rep) |
+| Stall | A lift's last 3 sessions no better than its best before them | A lighter week, another rep range, protein and sleep |
+| Streaks | 7, 14, 21, 30, 50 … days logged; protein on target 5, 10 or 20 days running | A short well done |
+
+- **Today**: up to three, most important first, under "Heads up", each with its step (log that day,
+  log weight, log exercise, see Progress) and a dismiss that is remembered.
+- **Notification**: at most one, at 9:00 the next morning: the most important thing the rules will
+  say tomorrow (priority 50 and over) that has not been dismissed or already shown on Today. It is
+  worked out again after every change to the logs and when the app opens. "Heads up" in Settings,
+  Reminders turns it off.
+- The Assistant is told what Heads up noticed today.
+
+## Logging a workout by describing it
+
+The owner's words: "I can type in the exercise that I did with the number of sets and reps from which
+the AI will figure out the calories". Picking an activity gave a figure from a fixed table.
+
+- The exercise sheet opens on a text field. "Work it out" sends the description and the owner's
+  weight to Groq, and the model returns one item per exercise: name, what was done ("4 x 10 at
+  60 kg"), the nearest app activity and intensity, minutes (given, or estimated from sets and rest,
+  or from distance and pace), and a MET from the Compendium of Physical Activities. Sets, reps
+  and load are kept when given.
+- The model never gives calories. The app works them out: (MET − 1) × weight × hours, the same
+  active-calorie rule as before, so every figure can be explained.
+- The owner reviews the list before logging. Tapping an item lets them change the minutes (the
+  calories follow at the same effort) or the calories, or remove it. Each item is logged as its
+  own workout and synced to Health Connect under its name.
+- "Pick an activity instead" keeps the old way for when there is no key or no signal. A logged
+  workout opens in that editor, with its name and description, and keeps its MET until the
+  activity or intensity changes.
+- Data: `exercises` gains `name`, `details`, `sets`, `reps`, `load_kg` and `met`. Backups carry them;
+  older backups without them still restore.
 
 ## Backup (Settings, "Your data")
 

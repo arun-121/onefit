@@ -1,5 +1,6 @@
 /// <reference types="jest" />
 import {
+  goalPlanText,
   backupProblemsText,
   changeSincePrevious,
   cleanNumberText,
@@ -743,5 +744,29 @@ describe('backup dialogs', () => {
 describe('copy rules', () => {
   it('states the weight range in plain words', () => {
     expect(WEIGHT_RANGE_HINT).toBe('Enter a weight between 20 and 400 kg.');
+  });
+});
+
+describe('goalPlanText', () => {
+  const me = { sex: 'male' as const, age: 30, heightCm: 175, weightKg: 80, activity: 'moderate' as const };
+
+  it('says how far under or over and the protein', () => {
+    expect(goalPlanText({ ...me, goal: 'lose_fat', rateKg: 0.5 }, null)).toBe(
+      'About 550 kcal a day under what you burn, with 2 g of protein per kg so you keep muscle.',
+    );
+    expect(goalPlanText({ ...me, goal: 'build_muscle', rateKg: 0.25 }, null)).toMatch(/^About 280 kcal a day over what you burn, with 2 g/);
+    expect(goalPlanText({ ...me, goal: 'maintain' }, null)).toBe('What you burn, with 1.6 g of protein per kg.');
+    expect(goalPlanText({ ...me, goal: 'recomp' }, null)).toMatch(/2\.2 g of protein per kg\. It needs strength training/);
+  });
+
+  it('adds the weeks to a target weight in the goal\'s direction only', () => {
+    expect(goalPlanText({ ...me, goal: 'lose_fat', rateKg: 0.5 }, 75)).toMatch(/At this pace, 75(\.0)? kg takes about 10 weeks\.$/);
+    expect(goalPlanText({ ...me, goal: 'build_muscle', rateKg: 0.25 }, 75)).not.toMatch(/weeks/);
+    expect(goalPlanText({ ...me, goal: 'build_muscle', rateKg: 0.25 }, 82)).toMatch(/takes about 8 weeks\.$/);
+  });
+
+  it('says when the floor holds the calories up', () => {
+    const tiny = { sex: 'female' as const, age: 70, heightCm: 145, weightKg: 40, activity: 'sedentary' as const };
+    expect(goalPlanText({ ...tiny, goal: 'lose_fat', rateKg: 1 }, 35)).toMatch(/Held at 1,?200 kcal, the lowest this suggests\.$/);
   });
 });

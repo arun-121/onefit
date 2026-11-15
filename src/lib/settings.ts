@@ -1,7 +1,7 @@
 import { todayKey } from './dates';
 import { getLatestWeight, kvGet, kvSet, notifyChanged } from './db';
 import { DEFAULT_WEIGHT_KG } from './exercise';
-import { calculateTargets, type Profile } from './nutrition';
+import { calculateTargets, type Profile, type Targets } from './nutrition';
 import { readSettings, type Settings } from './settings-schema';
 import { isValidWeightKg, roundKg } from './weight';
 
@@ -69,4 +69,25 @@ export function setWeightGoal(kg: number | null, today: string = todayKey()): Se
  */
 export function getBodyWeightKg(): number {
   return getLatestWeight()?.kg ?? getSettings().profile?.weightKg ?? DEFAULT_WEIGHT_KG;
+}
+
+/**
+ * Take a weekly check-in's targets (or, with null, put the check-in off): either way the next one
+ * is a week from today. Returns the settings from before, for Undo.
+ */
+export function finishCheckIn(targets: Targets | null, today: string, currentKg: number | null = null): Settings {
+  const before = getSettings();
+  updateSettings({
+    lastCheckInDate: today,
+    ...(targets
+      ? {
+          calorieGoal: targets.calories,
+          proteinGoal: targets.protein,
+          carbsGoal: targets.carbs,
+          fatGoal: targets.fat,
+          ...(currentKg !== null ? { targetsWeightKg: currentKg } : {}),
+        }
+      : {}),
+  });
+  return before;
 }

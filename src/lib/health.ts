@@ -23,7 +23,7 @@ import {
 } from 'react-native-health-connect';
 
 import { dateKeyToDate, dayRange, MEAL_DEFAULT_HOUR, toDateKey } from './dates';
-import { ACTIVITIES } from './exercise';
+import { ACTIVITIES, exerciseTitle } from './exercise';
 import type { Entry, Exercise, Meal, WeightEntry } from './types';
 import { isValidWeightKg, type HealthWeightSample } from './weight';
 
@@ -208,7 +208,7 @@ export async function writeExercise(ex: Exercise): Promise<{ sessionId: string |
       startTime: startTime.toISOString(),
       endTime: endTime.toISOString(),
       exerciseType: ACTIVITIES[ex.activity].healthType,
-      title: ACTIVITIES[ex.activity].label,
+      title: exerciseTitle(ex),
       metadata: meta('session'),
     },
   ]);

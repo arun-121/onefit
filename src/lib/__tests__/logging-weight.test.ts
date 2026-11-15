@@ -64,6 +64,8 @@ jest.mock('../reminders', () => ({
   cancelWeighInReminder: async (date: string) => void mockPhone.reminders.push(`cancel weigh-in ${date}`),
   keepRemindersAhead: async () => void mockPhone.reminders.push('keep ahead'),
   rescheduleReminders: async () => void mockPhone.reminders.push('rebuild'),
+  // Tomorrow's heads-up is worked out on every change; these tests are about the reminders.
+  refreshHeadsUp: async () => {},
 }));
 
 jest.mock('../../widget/refresh', () => ({ refreshWidgets: async () => {} }));
@@ -143,7 +145,7 @@ describe('undoing the delete of a weigh-in from another app', () => {
   });
 
   it('brings the body weight used for exercise estimates back with it', async () => {
-    setSettings({ healthConnectEnabled: true, profile: { sex: 'male', age: 30, heightCm: 175, weightKg: 80, activity: 'moderate', goal: 'lose' } });
+    setSettings({ healthConnectEnabled: true, profile: { sex: 'male', age: 30, heightCm: 175, weightKg: 80, activity: 'moderate', goal: 'lose_fat' } });
     await logWeight('2026-11-08', 80);
     imported('2026-11-09', 79.36);
     const removed = await deleteWeight('2026-11-09');

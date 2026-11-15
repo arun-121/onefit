@@ -20,7 +20,7 @@ const phoneSettings: Settings = {
   goalStartDate: '2026-10-01',
   goalStartWeightKg: 80,
   weighInReminder: { enabled: true, hour: 7, minute: 30 },
-  profile: { sex: 'male' as const, age: 30, heightCm: 175, weightKg: 78.4, activity: 'moderate' as const, goal: 'lose' as const },
+  profile: { sex: 'male' as const, age: 30, heightCm: 175, weightKg: 78.4, activity: 'moderate' as const, goal: 'lose_fat' as const, rateKg: 0.5 },
   targetsWeightKg: 80,
   notificationsAsked: true,
 };
@@ -34,7 +34,12 @@ const data: BackupData = {
     { id: 2, date: '2026-10-02', meal: 'snack', name: 'Black coffee', portion: '', calories: 2, protein: 0, carbs: 0, fat: 0, source: 'favourite', createdAt: 1790000100000, hcRecordId: null },
   ],
   foods: [{ id: 7, name: 'Idli', portion: '3 pieces', calories: 180, protein: 6, carbs: 36, fat: 1, pinned: true, useCount: 12, lastUsedAt: 1790000000000 }],
-  exercises: [{ id: 3, date: '2026-10-03', activity: 'run', minutes: 30, intensity: 'moderate', calories: 320, createdAt: 1790000200000, hcSessionId: 's-1', hcCaloriesId: 'c-1' }],
+  exercises: [
+    {
+      id: 3, date: '2026-10-03', activity: 'run', minutes: 30, intensity: 'moderate', calories: 320, createdAt: 1790000200000, hcSessionId: 's-1', hcCaloriesId: 'c-1',
+      name: 'Easy run', details: '5 km', sets: null, reps: null, loadKg: null, met: 9.8,
+    },
+  ],
   weights: [
     { id: 1, date: '2026-09-30', kg: 80, source: 'manual', createdAt: 1789900000000, hcRecordId: null },
     { id: 2, date: '2026-10-04', kg: 79.6, source: 'health', createdAt: 1790000300000, hcRecordId: 'scale-9' },
@@ -387,6 +392,26 @@ describe('what a restore keeps from this phone', () => {
 });
 
 describe('the setting that is about this phone', () => {
+  it('reads a workout from before workouts could be described', () => {
+    const check = validateBackup(
+      file((raw) => {
+        const ex = (raw.data as { exercises: Record<string, unknown>[] }).exercises[0];
+        for (const k of ['name', 'details', 'sets', 'reps', 'loadKg', 'met']) delete ex[k];
+      }),
+    );
+    expect(check.ok && check.backup.data.exercises[0]).toMatchObject({ name: '', details: '', sets: null, met: null, calories: 320 });
+  });
+
+  it('reads goals saved before goals had a pace as the new goals', () => {
+    const base = { sex: 'male', age: 30, heightCm: 175, weightKg: 80, activity: 'moderate' };
+    const read = (goal: string) => readSettings({ profile: { ...base, goal } }).profile;
+    expect(read('lose')).toMatchObject({ goal: 'lose_fat', rateKg: 0.5 });
+    expect(read('lose_slow')).toMatchObject({ goal: 'lose_fat', rateKg: 0.25 });
+    expect(read('gain')).toMatchObject({ goal: 'build_muscle', rateKg: 0.25 });
+    expect(read('maintain')).toEqual({ ...base, goal: 'maintain' });
+    expect(readSettings({ profile: { ...base, goal: 'build_muscle', rateKg: 0.4 } }).profile).toMatchObject({ rateKg: 0.4 });
+  });
+
   it('is off until the phone has been asked', () => {
     expect(readSettings(null).notificationsAsked).toBe(false);
     expect(readSettings({ notificationsAsked: true }).notificationsAsked).toBe(true);

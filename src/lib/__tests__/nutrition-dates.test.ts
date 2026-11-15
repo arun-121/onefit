@@ -1,6 +1,6 @@
 /// <reference types="jest" />
 import { addDays, dateKeyToDate, formatDayLabel, mealForTime, toDateKey } from '../dates';
-import { bmr, calculateTargets, caloriesLeft, MIN_CALORIE_TARGET, sumMacros, type Profile } from '../nutrition';
+import { bmr, calculateTargets, caloriesLeft, goalRateKg, MIN_CALORIE_TARGET, sumMacros, tdee, type Profile } from '../nutrition';
 
 const profile: Profile = { sex: 'male', age: 30, heightCm: 175, weightKg: 75, activity: 'moderate', goal: 'maintain' };
 
@@ -20,8 +20,27 @@ describe('nutrition', () => {
   });
 
   it('never goes below the safety floor', () => {
-    const tiny: Profile = { sex: 'female', age: 70, heightCm: 145, weightKg: 40, activity: 'sedentary', goal: 'lose' };
+    const tiny: Profile = { sex: 'female', age: 70, heightCm: 145, weightKg: 40, activity: 'sedentary', goal: 'lose_fat' };
     expect(calculateTargets(tiny).calories).toBe(MIN_CALORIE_TARGET);
+  });
+
+  it('works each goal out from its own pace and protein', () => {
+    const burn = tdee(profile); // about 2633
+    const near = (n: number) => Math.round(n / 10) * 10;
+    // Losing 0.5 kg a week is 550 kcal a day under, with 2 g protein per kg.
+    expect(calculateTargets({ ...profile, goal: 'lose_fat', rateKg: 0.5 })).toMatchObject({ calories: near(burn - 550), protein: 150 });
+    // Building muscle at 0.25 kg a week is 275 kcal a day over.
+    expect(calculateTargets({ ...profile, goal: 'build_muscle', rateKg: 0.25 }).calories).toBe(near(burn + 275));
+    // Losing fat while building muscle is 10% under, with 2.2 g protein per kg.
+    expect(calculateTargets({ ...profile, goal: 'recomp' })).toMatchObject({ calories: near(burn * 0.9), protein: 165 });
+  });
+
+  it('holds the pace to what each goal allows', () => {
+    expect(goalRateKg({ goal: 'lose_fat', rateKg: 3 })).toBe(1);
+    expect(goalRateKg({ goal: 'build_muscle', rateKg: 2 })).toBe(0.5);
+    expect(goalRateKg({ goal: 'build_muscle', rateKg: 0.01 })).toBe(0.1);
+    expect(goalRateKg({ goal: 'lose_fat' })).toBe(0.5);
+    expect(goalRateKg({ goal: 'maintain', rateKg: 0.5 })).toBe(0);
   });
 
   it('adds exercise calories only when opted in', () => {

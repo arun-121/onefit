@@ -1,11 +1,14 @@
 /**
- * Groq API client (OpenAI-compatible). Two calls:
+ * Groq API client (OpenAI-compatible). Four calls:
  *  - parseMealText: description -> items
+ *  - parseWorkoutText: described workout -> exercises
+ *  - askAssistant: a question about the owner's data -> answer
  *  - transcribeAudio: voice note -> text (Whisper)
  */
 import * as SecureStore from 'expo-secure-store';
 
 import { buildSystemPrompt, MEAL_JSON_SCHEMA, parseMealResponse, type ParsedMeal } from './ai-parse';
+import { buildWorkoutPrompt, parseWorkoutResponse, WORKOUT_JSON_SCHEMA, type ParsedWorkout } from './ai-workout';
 import type { FoodItem } from './types';
 
 const BASE_URL = 'https://api.groq.com/openai/v1';
@@ -101,11 +104,12 @@ interface ChatResponse {
 type ChatContent = string;
 
 interface ChatMessage {
-  role: 'system' | 'user';
+  role: 'system' | 'user' | 'assistant';
   content: ChatContent;
 }
 
-async function chatForMeal(model: string, messages: ChatMessage[]): Promise<ParsedMeal> {
+/** A chat call whose answer must follow `schema`; `read` turns the reply text into the result. */
+async function chatJson<T>(model: string, messages: ChatMessage[], name: string, schema: object, read: (content: string) => T, fail: string): Promise<T> {
   const extra = model.startsWith('openai/gpt-oss') ? { reasoning_effort: 'low' } : {};
   const request = (responseFormat: object) =>
     groqFetch<ChatResponse>(
@@ -120,10 +124,7 @@ async function chatForMeal(model: string, messages: ChatMessage[]): Promise<Pars
 
   let data: ChatResponse;
   try {
-    data = await request({
-      type: 'json_schema',
-      json_schema: { name: 'meal', strict: true, schema: MEAL_JSON_SCHEMA },
-    });
+    data = await request({ type: 'json_schema', json_schema: { name, strict: true, schema } });
   } catch (e) {
     // Some models only support plain JSON mode; retry once with that.
     if (e instanceof GroqError && e.status === 400 && /response_format|json_schema|structured|strict/i.test(e.detail)) {
@@ -136,19 +137,60 @@ async function chatForMeal(model: string, messages: ChatMessage[]): Promise<Pars
   const content = data.choices?.[0]?.message?.content;
   if (!content) throw new GroqError('Groq sent back an empty answer. Try again.');
   try {
-    return parseMealResponse(content);
+    return read(content);
   } catch {
-    throw new GroqError("Couldn't read Groq's answer. Try again, or rephrase the meal.");
+    throw new GroqError(fail);
   }
 }
 
 // ---------- public API ----------
 
 export function parseMealText(text: string, model: string, knownFoods: readonly FoodItem[]): Promise<ParsedMeal> {
-  return chatForMeal(model, [
-    { role: 'system', content: buildSystemPrompt(knownFoods) },
-    { role: 'user', content: text },
-  ]);
+  return chatJson(
+    model,
+    [
+      { role: 'system', content: buildSystemPrompt(knownFoods) },
+      { role: 'user', content: text },
+    ],
+    'meal',
+    MEAL_JSON_SCHEMA,
+    parseMealResponse,
+    "Couldn't read Groq's answer. Try again, or rephrase the meal.",
+  );
+}
+
+/** A described workout -> exercises with minutes and MET; calories worked out for `weightKg`. */
+export function parseWorkoutText(text: string, model: string, weightKg: number): Promise<ParsedWorkout> {
+  return chatJson(
+    model,
+    [
+      { role: 'system', content: buildWorkoutPrompt(weightKg) },
+      { role: 'user', content: text },
+    ],
+    'workout',
+    WORKOUT_JSON_SCHEMA,
+    (content) => parseWorkoutResponse(content, weightKg),
+    "Couldn't read Groq's answer. Try again, or describe the workout another way.",
+  );
+}
+
+/** One answer from the assistant: the system prompt (rules and the owner's data), then the conversation. */
+export async function askAssistant(model: string, system: string, conversation: readonly { role: 'user' | 'assistant'; content: string }[]): Promise<string> {
+  const extra = model.startsWith('openai/gpt-oss') ? { reasoning_effort: 'low' } : {};
+  const messages: ChatMessage[] = [{ role: 'system', content: system }, ...conversation];
+  const data = await groqFetch<ChatResponse>(
+    '/chat/completions',
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model, messages, temperature: 0.4, max_completion_tokens: 1200, ...extra }),
+    },
+    model,
+    60_000,
+  );
+  const content = data.choices?.[0]?.message?.content?.trim();
+  if (!content) throw new GroqError('Groq sent back an empty answer. Try again.');
+  return content;
 }
 
 const AUDIO_TYPES: Record<string, string> = {

@@ -7,6 +7,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import {
   backupProblemsText,
   countBackup,
+  goalPlanText,
   goalStatusText,
   healthText,
   keepUnits,
@@ -66,6 +67,8 @@ import {
   calculateTargets,
   formatKcal,
   GOAL_LABELS,
+  GOAL_RATES,
+  goalRateKg,
   type ActivityLevel,
   type GoalType,
   type Profile,
@@ -76,6 +79,7 @@ import {
   hasNotificationPermission,
   REMINDER_MEALS,
   requestNotifications,
+  refreshHeadsUp,
   rescheduleReminders,
 } from '@/lib/reminders';
 import {
@@ -129,7 +133,7 @@ export default function SettingsScreen() {
 
 // ---------------------------------------------------------------- targets
 
-const DEFAULT_PROFILE: Profile = { sex: 'male', age: 30, heightCm: 170, weightKg: 70, activity: 'light', goal: 'lose_slow' };
+const DEFAULT_PROFILE: Profile = { sex: 'male', age: 30, heightCm: 170, weightKg: 70, activity: 'light', goal: 'lose_fat', rateKg: 0.5 };
 
 const MACROS: { key: Category; label: string }[] = [
   { key: 'protein', label: 'Protein' },
@@ -159,6 +163,15 @@ function TargetsSection() {
   // Counts the times the field was put back to the saved target, which starts it afresh.
   const [goalFieldResets, setGoalFieldResets] = useState(0);
   const preview = calculateTargets(profile);
+  const rateRange = GOAL_RATES[profile.goal];
+  // Says the range, and when the typed pace is outside it, the pace that is used instead.
+  const rateText = (() => {
+    if (!rateRange) return '';
+    const typed = profile.rateKg;
+    const used = goalRateKg(profile);
+    const range = `Between ${rateRange.min} and ${rateRange.max} kg.`;
+    return typed !== undefined && typed > 0 && Math.abs(typed - used) > 1e-9 ? `${range} Using ${used} kg.` : range;
+  })();
   const setP = (patch: Partial<Profile>) => setProfile((p) => ({ ...p, ...patch }));
 
   const save = (patch: Parameters<typeof updateSettings>[0]) => {
@@ -347,9 +360,34 @@ function TargetsSection() {
                 </AppText>
                 <View style={styles.wrap}>
                   {(Object.keys(GOAL_LABELS) as GoalType[]).map((g) => (
-                    <Chip key={g} kind="filter" label={GOAL_LABELS[g]} selected={profile.goal === g} onPress={() => setP({ goal: g })} />
+                    <Chip
+                      key={g}
+                      kind="filter"
+                      label={GOAL_LABELS[g]}
+                      selected={profile.goal === g}
+                      // Each goal starts at its usual pace; a pace typed for another goal may be out of its range.
+                      onPress={() => setP({ goal: g, rateKg: GOAL_RATES[g]?.usual })}
+                    />
                   ))}
                 </View>
+                {rateRange ? (
+                  <Row style={styles.fieldRow}>
+                    <NumberField
+                      key={profile.goal}
+                      label={profile.goal === 'build_muscle' ? 'Gain' : 'Lose'}
+                      suffix="kg a week"
+                      decimals={2}
+                      maxDecimals={2}
+                      selectOnFocus
+                      value={profile.rateKg ?? rateRange.usual}
+                      onChange={(rateKg) => setP({ rateKg })}
+                    />
+                  </Row>
+                ) : null}
+                <AppText variant="bodyMedium" color={colors.onSurfaceVariant}>
+                  {rateRange ? `${rateText} ` : ''}
+                  {goalPlanText(profile, goal)}
+                </AppText>
               </View>
               {/* What the calculator came to, lit as a food figure: the calories, the three macros
                   with their colours as Today's day summary draws them, and the button that uses them. */}
@@ -566,6 +604,21 @@ function RemindersSection() {
               value={weighIn.enabled}
               onValueChange={(enabled) => void apply({ weighInReminder: { ...weighIn, enabled } }, !enabled)}
               accessibilityLabel="Weigh-in reminder"
+            />
+          }
+        />
+        <GroupRow
+          icon="lightbulb-on-outline"
+          tone={litTone(settings.headsUpNotifications, 'secondary')}
+          headline="Heads up"
+          supporting="A morning note when something stands out: an unusual day, a gap, a new best. One a day at most"
+          trailing={
+            <Switch
+              value={settings.headsUpNotifications}
+              onValueChange={(v) => {
+                void apply({ headsUpNotifications: v }, !v).then(() => refreshHeadsUp());
+              }}
+              accessibilityLabel="Heads-up notifications"
             />
           }
         />

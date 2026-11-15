@@ -10,6 +10,7 @@ import type { BackupFile } from '../lib/backup-format';
 import { addDays, dateKeyToDate, formatShortDate, toDateKey } from '../lib/dates';
 import { DEFAULT_WEIGHT_KG, formatMinutes } from '../lib/exercise';
 import type { HealthGrants } from '../lib/health';
+import { formatKcal, goalAdjustment, goalRateKg, MIN_CALORIE_TARGET, proteinPerKg, tdee, type Profile } from '../lib/nutrition';
 import type { Card, Direction, Streak, TodaySummary, WeightRate } from '../lib/insights';
 import { formatKg, formatKgChange, isValidWeightKg, MAX_WEIGHT_KG, MIN_WEIGHT_KG, roundKg } from '../lib/weight';
 
@@ -437,4 +438,43 @@ export function backupProblemsText(problems: readonly string[]): string {
   const lines = problems.map((p) => p.trim()).filter((p) => p.length > 0);
   if (lines.length === 0) lines.push('This file is not a Calorie Tracker backup.');
   return `${lines.join('\n')}\n\nNothing on this phone was changed.`;
+}
+
+/**
+ * What the goal picked in the targets calculator does, said under the goals: how far the calories sit
+ * from what the profile burns, the protein that goes with it, and, when there is a target weight in
+ * the goal's direction, about how many weeks the pace takes to reach it.
+ */
+export function goalPlanText(p: Profile, targetKg: number | null): string {
+  const burn = tdee(p);
+  const raw = burn + goalAdjustment(p);
+  const floored = raw < MIN_CALORIE_TARGET;
+  const change = Math.round(Math.abs(Math.max(MIN_CALORIE_TARGET, raw) - burn) / 10) * 10;
+  const protein = `${proteinPerKg(p.goal)} g of protein per kg`;
+  let text: string;
+  switch (p.goal) {
+    case 'lose_fat':
+      text = `About ${formatKcal(change)} kcal a day under what you burn, with ${protein} so you keep muscle.`;
+      break;
+    case 'build_muscle':
+      text = `About ${formatKcal(change)} kcal a day over what you burn, with ${protein}. Pair it with strength training.`;
+      break;
+    case 'recomp':
+      text = `About ${formatKcal(change)} kcal a day under what you burn, with ${protein}. It needs strength training 3 or more days a week.`;
+      break;
+    case 'maintain':
+      text = `What you burn, with ${protein}.`;
+      break;
+  }
+  if (floored) return `${text} Held at ${formatKcal(MIN_CALORIE_TARGET)} kcal, the lowest this suggests.`;
+  const rate = goalRateKg(p);
+  if (targetKg !== null && isValidWeightKg(targetKg) && rate > 0 && isValidWeightKg(p.weightKg)) {
+    const gap = targetKg - p.weightKg;
+    const towards = p.goal === 'lose_fat' ? gap <= -0.05 : gap >= 0.05;
+    if (towards) {
+      const weeks = Math.max(1, Math.ceil(Math.abs(gap) / rate));
+      text += ` At this pace, ${formatKg(targetKg)} takes about ${weeks} ${weeks === 1 ? 'week' : 'weeks'}.`;
+    }
+  }
+  return text;
 }

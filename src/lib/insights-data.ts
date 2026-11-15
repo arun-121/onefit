@@ -5,6 +5,7 @@
  * Use with the live-query hook so the cards follow the data:
  *   const insights = useLiveQuery(() => loadInsights(today, days), [today, days]);
  */
+import { weeklyCheckIn, type CheckIn } from './check-in';
 import { addDays } from './dates';
 import {
   getAllWeights,
@@ -64,4 +65,17 @@ export function loadTodaySummary(today: string): TodaySummary {
  */
 export function loadCurrentWeightKg(today: string): number | null {
   return currentWeightKg(getAllWeights(), today);
+}
+
+/** The weekly check-in due today, or null (see `weeklyCheckIn`). */
+export function loadCheckIn(today: string): CheckIn | null {
+  const settings = getSettings();
+  return weeklyCheckIn({
+    today,
+    lastCheckInDate: settings.lastCheckInDate,
+    maintenance: loadInsights(today, 30).maintenance,
+    profile: settings.profile,
+    currentKg: currentWeightKg(getAllWeights(), today),
+    goals: { calories: settings.calorieGoal, protein: settings.proteinGoal, carbs: settings.carbsGoal, fat: settings.fatGoal },
+  });
 }
