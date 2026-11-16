@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "Calorie Tracker",
+    "name": "OneFit",
     "slug": "calorie-tracker",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -13,7 +13,7 @@
     "android": {
       "package": "com.calorietracker.app",
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
+        "backgroundColor": "#6750A4",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
         "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
@@ -37,9 +37,13 @@
       [
         "expo-splash-screen",
         {
-          "backgroundColor": "#208AEF",
+          "backgroundColor": "#EADDFF",
           "image": "./assets/images/splash-icon.png",
-          "imageWidth": 76
+          "imageWidth": 100,
+          "dark": {
+            "backgroundColor": "#1D1B20",
+            "image": "./assets/images/splash-icon-dark.png"
+          }
         }
       ],
       "expo-sqlite",

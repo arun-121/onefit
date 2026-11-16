@@ -490,7 +490,7 @@ function RemindersSection() {
       const ok = await ensureNotificationPermission();
       setAllowed(ok);
       if (!ok) {
-        Alert.alert('Notifications are off', 'Turn on notifications for Calorie Tracker in Android settings to get reminders.');
+        Alert.alert('Notifications are off', 'Turn on notifications for OneFit in Android settings to get reminders.');
         return;
       }
     }
@@ -511,7 +511,7 @@ function RemindersSection() {
         // Android has stopped asking, so only its own settings can switch notifications on.
         Alert.alert(
           'Allow notifications in Android settings',
-          'Android will not ask again from here. Open settings, tap Notifications and switch them on for Calorie Tracker.',
+          'Android will not ask again from here. Open settings, tap Notifications and switch them on for OneFit.',
           [
             { text: 'Not now', style: 'cancel' },
             { text: 'Open settings', onPress: () => void Linking.openSettings().catch(() => {}) },
@@ -714,7 +714,7 @@ function HealthSection() {
         // Android stops showing its permission screen after it has been turned down twice.
         Alert.alert(
           what === 'weight' ? 'Weight is not fully allowed yet' : 'Workouts are not allowed yet',
-          `If Android did not ask, open Health Connect and allow ${what === 'weight' ? 'Weight' : 'Exercise and Active calories burned'} for Calorie Tracker. Everything else keeps working without it.`,
+          `If Android did not ask, open Health Connect and allow ${what === 'weight' ? 'Weight' : 'Exercise and Active calories burned'} for OneFit. Everything else keeps working without it.`,
           [
             { text: 'Not now', style: 'cancel' },
             { text: 'Open Health Connect', onPress: openHealthSettings },
@@ -732,7 +732,7 @@ function HealthSection() {
     updateSettings({ healthConnectEnabled: false });
     const current = await getHealthGrants().catch(() => null);
     if (current?.writeNutrition) {
-      Alert.alert('Stopped syncing', 'To remove access completely, open Health Connect and revoke Calorie Tracker.', [
+      Alert.alert('Stopped syncing', 'To remove access completely, open Health Connect and revoke OneFit.', [
         { text: 'Later', style: 'cancel' },
         { text: 'Open Health Connect', onPress: openHealthSettings },
       ]);
@@ -816,7 +816,7 @@ function HealthSection() {
 
 function WidgetSection() {
   const pin = async (widgetName: string) => {
-    const fallback = () => Alert.alert('Add the widget', 'Long-press your home screen, tap Widgets and find Calorie Tracker.');
+    const fallback = () => Alert.alert('Add the widget', 'Long-press your home screen, tap Widgets and find OneFit.');
     try {
       if (!(await requestPinWidget({ widgetName }))) fallback();
     } catch {

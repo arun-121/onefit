@@ -89,7 +89,7 @@ function currentHealthIds(): HealthIds {
  */
 export function restoreBackup(payload: BackupFile): BackupSummary {
   const check = validateBackup(payload);
-  if (!check.ok) throw new Error(check.problems[0] ?? 'This file is not a Calorie Tracker backup.');
+  if (!check.ok) throw new Error(check.problems[0] ?? 'This file is not a OneFit backup.');
   const { data } = check.backup;
   const known = currentHealthIds();
   const keep = (type: OwnRecordType, id: string | null) => (id !== null && known[type].has(id) ? id : null);
@@ -204,7 +204,7 @@ export async function pickBackupFile(): Promise<PickedFile> {
   const asset = result.assets[0];
   const copy = new File(asset.uri);
   try {
-    if ((asset.size ?? 0) > MAX_BACKUP_BYTES) throw new Error('That file is too large to be a Calorie Tracker backup.');
+    if ((asset.size ?? 0) > MAX_BACKUP_BYTES) throw new Error('That file is too large to be a OneFit backup.');
     let text: string;
     try {
       text = await copy.text();
@@ -215,7 +215,7 @@ export async function pickBackupFile(): Promise<PickedFile> {
     try {
       return { canceled: false, fileName: asset.name, contents: JSON.parse(text) as unknown };
     } catch {
-      throw new Error('That file is not a Calorie Tracker backup. Choose the .json file that Export backup made.');
+      throw new Error('That file is not a OneFit backup. Choose the .json file that Export backup made.');
     }
   } finally {
     // The picker left a copy in the cache; it has been read, so it can go.

@@ -156,13 +156,13 @@ describe('the wrong file', () => {
   it.each([null, undefined, 42, 'calorie-tracker', [], {}, { app: 'another-app', format: 1 }, { format: 1, data: {} }])(
     'rejects %p as not a backup',
     (raw) => {
-      expect(validateBackup(raw)).toEqual({ ok: false, problems: ['This file is not a Calorie Tracker backup.'] });
+      expect(validateBackup(raw)).toEqual({ ok: false, problems: ['This file is not a OneFit backup.'] });
     },
   );
 
   it('rejects a format from a newer app, and says to update', () => {
     expect(problems(validateBackup(file((raw) => (raw.format = 2))))).toEqual([
-      'This backup was made by a newer version of Calorie Tracker. Update the app, then restore it.',
+      'This backup was made by a newer version of OneFit. Update the app, then restore it.',
     ]);
   });
 
@@ -325,8 +325,8 @@ describe('making a backup', () => {
   });
 
   it('names the file for the local day', () => {
-    expect(backupFileName(new Date(2026, 10, 11, 23, 30))).toBe('calorie-tracker-backup-2026-11-11.json');
-    expect(backupFileName(new Date(2027, 0, 5, 0, 10))).toBe('calorie-tracker-backup-2027-01-05.json');
+    expect(backupFileName(new Date(2026, 10, 11, 23, 30))).toBe('onefit-backup-2026-11-11.json');
+    expect(backupFileName(new Date(2027, 0, 5, 0, 10))).toBe('onefit-backup-2027-01-05.json');
   });
 
   it('describes what is inside', () => {

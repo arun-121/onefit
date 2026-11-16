@@ -526,7 +526,7 @@ export function restoreDoneText(file: DataCounts): string {
 /** Why a picked file cannot be restored, one problem per line, ending with what happened to the phone. */
 export function backupProblemsText(problems: readonly string[]): string {
   const lines = problems.map((p) => p.trim()).filter((p) => p.length > 0);
-  if (lines.length === 0) lines.push('This file is not a Calorie Tracker backup.');
+  if (lines.length === 0) lines.push('This file is not a OneFit backup.');
   return `${lines.join('\n')}\n\nNothing on this phone was changed.`;
 }
 

@@ -189,7 +189,7 @@ function readRows<T>(
  */
 export function validateBackup(raw: unknown): BackupCheck {
   if (!isRecord(raw) || raw.app !== BACKUP_APP) {
-    return { ok: false, problems: ['This file is not a Calorie Tracker backup.'] };
+    return { ok: false, problems: ['This file is not a OneFit backup.'] };
   }
   if (raw.format !== BACKUP_FORMAT) {
     const newer = typeof raw.format === 'number' && Number.isInteger(raw.format) && raw.format > BACKUP_FORMAT;
@@ -197,7 +197,7 @@ export function validateBackup(raw: unknown): BackupCheck {
       ok: false,
       problems: [
         newer
-          ? 'This backup was made by a newer version of Calorie Tracker. Update the app, then restore it.'
+          ? 'This backup was made by a newer version of OneFit. Update the app, then restore it.'
           : 'This backup is in a format this app does not understand.',
       ],
     };
@@ -361,9 +361,12 @@ export function keepPhoneState(data: BackupData, phone: PhoneState): KeptPhoneSt
   };
 }
 
-/** "calorie-tracker-backup-2026-11-11.json", named for the local day it was made. */
+/**
+ * "onefit-backup-2026-11-11.json", named for the local day it was made. The app id inside the file
+ * stays `calorie-tracker` (the app's first name), so backups made before the rename still restore.
+ */
 export function backupFileName(now: Date = new Date()): string {
-  return `${BACKUP_APP}-backup-${toDateKey(now)}.json`;
+  return `onefit-backup-${toDateKey(now)}.json`;
 }
 
 const count = (n: number, one: string, many: string): string => `${n.toLocaleString('en-US')} ${n === 1 ? one : many}`;

@@ -742,8 +742,8 @@ describe('backup dialogs', () => {
   });
 
   it('still says something when no reason was given', () => {
-    expect(backupProblemsText([])).toBe('This file is not a Calorie Tracker backup.\n\nNothing on this phone was changed.');
-    expect(backupProblemsText(['  ', ''])).toBe('This file is not a Calorie Tracker backup.\n\nNothing on this phone was changed.');
+    expect(backupProblemsText([])).toBe('This file is not a OneFit backup.\n\nNothing on this phone was changed.');
+    expect(backupProblemsText(['  ', ''])).toBe('This file is not a OneFit backup.\n\nNothing on this phone was changed.');
   });
 });
 
